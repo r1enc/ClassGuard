@@ -13,14 +13,17 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 import 'dart:convert';
+import 'dart:io';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:auto_start_flutter/auto_start_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 
-// ==========================================
+// =============================================
 // UTILITY FUNCTIONS (Smart Sorting & Collision)
-// ==========================================
+// =============================================
 int timeToMinutes(String time) {
   final parts = time.split(':');
   if (parts.length != 2) return 0;
@@ -46,7 +49,12 @@ DateTime getNextOccurrence(String dayStr, String timeStr) {
 }
 
 Future<String?> checkAndHandleCollision(String newDay, String newStart, String newEnd, String newRole, {String? excludeId}) async {
-  final snapshot = await FirebaseFirestore.instance.collection('schedules').where('day', isEqualTo: newDay).get();
+  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
+  final snapshot = await FirebaseFirestore.instance.collection('schedules')
+      .where('joinedStudents', arrayContains: uid)
+      .where('day', isEqualTo: newDay).get();
+
   int newStartMin = timeToMinutes(newStart);
   int newEndMin = timeToMinutes(newEnd);
 
@@ -61,8 +69,13 @@ Future<String?> checkAndHandleCollision(String newDay, String newStart, String n
     int existEnd = timeToMinutes(data['endTime'] ?? '00:00');
 
     if (newStartMin < existEnd && newEndMin > existStart) {
+      String existRole = data['role'] ?? 'Personal';
+      if (existRole == 'Teacher' && data['userId'] != uid) {
+        existRole = 'Student';
+      }
+
       if (newRole == 'Teacher' || newRole == 'Student') {
-        if (data['role'] == 'Personal') {
+        if (existRole == 'Personal') {
           await FirebaseFirestore.instance.collection('schedules').doc(doc.id).update({'isActive': false});
           personalOverridden = true;
         } else {
@@ -87,8 +100,13 @@ void startClassGuard() async {
   SharedPreferences prefs = await SharedPreferences.getInstance();
 
   try {
+    double currentVol = await VolumeController().getVolume();
+    await prefs.setDouble('prevVolume', currentVol);
+
     await SoundMode.setSoundMode(RingerModeStatus.silent);
+    await Future.delayed(const Duration(milliseconds: 500));
     VolumeController().setVolume(0.0);
+
     try {
       const platform = MethodChannel('com.classguard/applock');
 
@@ -102,10 +120,14 @@ void startClassGuard() async {
         await platform.invokeMethod('triggerEmergencyPopup');
       }
     } catch (e) {
-      debugPrint("Failed to check permission in background: $e");
+      debugPrint("Permission check failed: $e");
     }
 
-    final snapshot = await FirebaseFirestore.instance.collection('schedules').where('isActive', isEqualTo: true).get();
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? prefs.getString('userUid') ?? "";
+    final snapshot = await FirebaseFirestore.instance.collection('schedules')
+        .where('joinedStudents', arrayContains: uid)
+        .where('isActive', isEqualTo: true).get();
+
     final now = DateTime.now();
     final dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
 
@@ -120,12 +142,26 @@ void startClassGuard() async {
         int end = timeToMinutes(data['endTime'] ?? "00:00");
         int current = now.hour * 60 + now.minute;
 
-        if (current >= start - 2 && current <= end) {
+        if (current >= start - 2 && current < end) {
+          if (data['role'] == 'Teacher' && data['userId'] == uid) {
+            continue;
+          }
+
           List<dynamic> apps = data['blockedApps'] ?? [];
           currentBlockedApps = apps.join(',');
 
           currentAllowanceTime = data['allowanceTime'] ?? 2;
           currentPin = data['securityPIN'] ?? "1234";
+
+          Map<String, dynamic> vipAccess = data['vipAccess'] ?? {};
+          var myVip = vipAccess[uid];
+          if (myVip != null) {
+            await prefs.setString('allowedApp', myVip['app']);
+            await prefs.setInt('allowedUntil', myVip['until']);
+          } else {
+            await prefs.setString('allowedApp', "");
+            await prefs.setInt('allowedUntil', 0);
+          }
           break;
         }
       }
@@ -137,7 +173,7 @@ void startClassGuard() async {
     await prefs.setBool('isAppLockActive', true);
 
     Fluttertoast.showToast(
-      msg: "Class started: Device is Silent & Distracting Apps Locked",
+      msg: "Class started: Device is Silent & Apps Locked",
       toastLength: Toast.LENGTH_LONG,
       backgroundColor: Colors.black,
       textColor: Colors.white,
@@ -167,8 +203,10 @@ void stopClassGuard() async {
   SharedPreferences prefs = await SharedPreferences.getInstance();
 
   try {
+    double prevVol = prefs.getDouble('prevVolume') ?? 0.5;
     await SoundMode.setSoundMode(RingerModeStatus.normal);
-    VolumeController().setVolume(0.5);
+    await Future.delayed(const Duration(milliseconds: 500));
+    VolumeController().setVolume(prevVol);
 
     await prefs.setBool('isAppLockActive', false);
 
@@ -205,9 +243,9 @@ void main() async {
   runApp(const ClassGuardApp());
 }
 
-// ==========================================
+// ==================
 // 1. DATA STRUCTURE
-// ==========================================
+// ==================
 class Course {
   String? id;
   String subject;
@@ -224,6 +262,7 @@ class Course {
   String? securityPIN;
   int allowanceTime;
   List<dynamic> blockedApps;
+  bool isOwner;
 
   Course({
     this.id,
@@ -241,12 +280,13 @@ class Course {
     this.securityPIN,
     this.allowanceTime = 0,
     this.blockedApps = const [],
+    this.isOwner = true,
   });
 }
 
-// ==========================================
+// ==============
 // 2. APP THEME
-// ==========================================
+// ==============
 class ClassGuardApp extends StatelessWidget {
   const ClassGuardApp({super.key});
 
@@ -268,16 +308,16 @@ class ClassGuardApp extends StatelessWidget {
   }
 }
 
-// ==========================================
+// =================================
 // PAGE TRANSITION ANIMATION HELPER
-// ==========================================
+// =================================
 Route _createRoute(Widget page) {
   return CupertinoPageRoute(builder: (context) => page);
 }
 
-// ==========================================
+// =================================
 // 2.1 PERMISSION ONBOARDING SCREEN
-// ==========================================
+// =================================
 class PermissionOnboardingScreen extends StatefulWidget {
   final bool isFromSettings;
   const PermissionOnboardingScreen({super.key, this.isFromSettings = false});
@@ -292,7 +332,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   bool isOverlayGranted = false;
   bool isBatteryGranted = false;
   bool isUsageGranted = false;
-  bool isAutoStartClicked = false;
+  bool isAutoStartConfigured = false;
 
   final platform = const MethodChannel('com.classguard/applock');
 
@@ -317,11 +357,15 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   }
 
   Future<void> _checkAllPermissions() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool autoStartMemory = prefs.getBool('isAutoStartConfigured') ?? false;
+
     bool? dndStatus = await PermissionHandler.permissionsGranted;
     bool accStatus = false;
     bool ovrStatus = false;
     bool batStatus = false;
     bool usageStatus = false;
+
     try {
       accStatus = await platform.invokeMethod('checkAccessibilityPermission') ?? false;
       ovrStatus = await platform.invokeMethod('checkOverlayPermission') ?? false;
@@ -330,6 +374,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     } catch (e) {}
 
     setState(() {
+      isAutoStartConfigured = autoStartMemory;
       isDndGranted = dndStatus ?? false;
       isAccessibilityGranted = accStatus;
       isOverlayGranted = ovrStatus;
@@ -343,17 +388,24 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   void _requestAccessibility() async => await platform.invokeMethod('openAccessibilitySettings');
   void _requestOverlay() async => await platform.invokeMethod('requestOverlayPermission');
   void _requestBattery() async => await platform.invokeMethod('requestBatteryOptimization');
+
   void _requestAutoStart() async {
-    await platform.invokeMethod('requestAutoStartPermission');
-    Fluttertoast.showToast(msg: "Please turn ON Auto Start for ClassGuard!");
+    try {
+      await getAutoStartPermission();
+    } catch (e) {
+      await platform.invokeMethod('requestAutoStartPermission');
+    }
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isAutoStartConfigured', true);
     setState(() {
-      isAutoStartClicked = true;
+      isAutoStartConfigured = true;
     });
+    Fluttertoast.showToast(msg: "Auto Start configured.");
   }
 
   void _proceedToAuth(BuildContext context) async {
-    if (!isDndGranted || !isAccessibilityGranted || !isOverlayGranted || !isBatteryGranted || !isUsageGranted || !isAutoStartClicked) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please grant all 6 required permissions first.')));
+    if (!isDndGranted || !isAccessibilityGranted || !isOverlayGranted || !isBatteryGranted || !isUsageGranted || !isAutoStartConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please grant all required permissions first.')));
       return;
     }
     if (widget.isFromSettings) {
@@ -361,13 +413,13 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     } else {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isFirstTimeSetupDone', true);
-      if (context.mounted) Navigator.pushReplacement(context, _createRoute(const AuthScreen()));
+      if (context.mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const AuthScreen()));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    bool allGranted = isDndGranted && isAccessibilityGranted && isOverlayGranted && isBatteryGranted && isUsageGranted && isAutoStartClicked;
+    bool allGranted = isDndGranted && isAccessibilityGranted && isOverlayGranted && isBatteryGranted && isUsageGranted && isAutoStartConfigured;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -398,50 +450,19 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
               const SizedBox(height: 16),
               _buildPermissionItem(icon: Icons.battery_charging_full, title: 'Battery Optimization', description: 'Prevent system kill.', isGranted: isBatteryGranted, onRequest: _requestBattery),
               const SizedBox(height: 16),
-
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                    color: isAutoStartClicked ? Colors.green.withOpacity(0.05) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: isAutoStartClicked ? Colors.green.shade200 : Colors.orange.shade200)
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                            color: isAutoStartClicked ? Colors.black.withOpacity(0.05) : Colors.orange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12)
-                        ),
-                        child: Icon(Icons.rocket_launch, size: 24, color: isAutoStartClicked ? Colors.green : Colors.orange)
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-                      Text('Auto Start (Crucial)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 4),
-                      Text('Required to keep the protection active in the background. Please turn ON Auto Start.', style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.4))
-                    ])),
-                    const SizedBox(width: 8),
-                    if (isAutoStartClicked)
-                      const Icon(Icons.check_circle, color: Colors.green, size: 28)
-                    else
-                      ElevatedButton(
-                          onPressed: _requestAutoStart,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16)),
-                          child: const Text('Configure', style: TextStyle(fontSize: 12))
-                      )
-                  ],
-                ),
-              ),
+              _buildPermissionItem(icon: Icons.rocket_launch, title: 'Auto Start', description: 'Required to keep the protection active.', isGranted: isAutoStartConfigured, onRequest: _requestAutoStart),
 
               const SizedBox(height: 48),
               SizedBox(
                 width: double.infinity, height: 56,
                 child: ElevatedButton(
-                  onPressed: () => _proceedToAuth(context),
-                  style: ElevatedButton.styleFrom(backgroundColor: allGranted ? Colors.black : Colors.grey.shade300, foregroundColor: allGranted ? Colors.white : Colors.black38, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
+                  onPressed: allGranted ? () => _proceedToAuth(context) : null,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: allGranted ? Colors.black : Colors.grey.shade300,
+                      foregroundColor: allGranted ? Colors.white : Colors.black38,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 0
+                  ),
                   child: Text(widget.isFromSettings ? 'Done' : (allGranted ? 'Continue' : 'Permissions Required'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
                 ),
               ),
@@ -456,24 +477,24 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: isGranted ? Colors.green.withOpacity(0.05) : Colors.transparent, borderRadius: BorderRadius.circular(12), border: Border.all(color: isGranted ? Colors.green.shade200 : Colors.black12)),
+      decoration: BoxDecoration(color: isGranted ? Colors.green.withValues(alpha: 0.05) : Colors.transparent, borderRadius: BorderRadius.circular(12), border: Border.all(color: isGranted ? Colors.green.shade200 : Colors.black12)),
       child: Row(
         children: [
-          Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(12)), child: Icon(icon, size: 24, color: isGranted ? Colors.green : Colors.black87)),
+          Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)), child: Icon(icon, size: 24, color: isGranted ? Colors.green : Colors.black87)),
           const SizedBox(width: 16),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text(description, style: const TextStyle(fontSize: 12, color: Colors.black54, height: 1.4))])),
           const SizedBox(width: 8),
           if (isGranted) const Icon(Icons.check_circle, color: Colors.green, size: 28)
-          else ElevatedButton(onPressed: onRequest, style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16)), child: const Text('Grant', style: TextStyle(fontSize: 12)))
+          else ElevatedButton(onPressed: onRequest, style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16)), child: const Text('Configure', style: TextStyle(fontSize: 12)))
         ],
       ),
     );
   }
 }
 
-// ==========================================
+// ========================================
 // 3. AUTHENTICATION SCREEN (FIREBASE AUTH)
-// ==========================================
+// ========================================
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
 
@@ -511,25 +532,51 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String finalName = "Student";
+      String finalEmail = emailController.text.trim();
+      String finalId = "";
 
       if (isLogin) {
         UserCredential user = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: emailController.text.trim(),
           password: passwordController.text.trim(),
         );
-        finalName = user.user?.displayName ?? prefs.getString('profileName') ?? "Student";
-        await prefs.setString('profileName', finalName);
+
+        DocumentSnapshot doc = await FirebaseFirestore.instance.collection('users').doc(user.user!.uid).get();
+        if (doc.exists) {
+          final data = doc.data() as Map<String, dynamic>;
+          finalName = data['name'] ?? user.user?.displayName ?? "Student";
+          finalEmail = data['email'] ?? finalEmail;
+          finalId = data['studentId'] ?? (Random().nextInt(900000000) + 100000000).toString();
+          String? cloudImage = data['profileImage'];
+          if (cloudImage != null) {
+            await prefs.setString('profileImage', cloudImage);
+          }
+        } else {
+          finalName = user.user?.displayName ?? "Student";
+          finalId = (Random().nextInt(900000000) + 100000000).toString();
+        }
       } else {
         UserCredential user = await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: emailController.text.trim(),
           password: passwordController.text.trim(),
         );
         finalName = nameController.text.trim();
+        finalId = (Random().nextInt(900000000) + 100000000).toString();
+
         await user.user?.updateDisplayName(finalName);
-        await prefs.setString('profileName', finalName);
-        await prefs.setString('profileEmail', emailController.text.trim());
+
+        await FirebaseFirestore.instance.collection('users').doc(user.user!.uid).set({
+          'name': finalName,
+          'email': finalEmail,
+          'studentId': finalId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
 
+      await prefs.setString('profileName', finalName);
+      await prefs.setString('profileEmail', finalEmail);
+      await prefs.setString('profileId', finalId);
+      await prefs.setString('userUid', FirebaseAuth.instance.currentUser!.uid);
       await prefs.setBool('isLoggedIn', true);
 
       if (mounted) {
@@ -556,13 +603,12 @@ class _AuthScreenState extends State<AuthScreen> {
               children: [
                 Text(isLogin ? 'Welcome Back' : 'Create Account', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black87, letterSpacing: -0.5)),
                 const SizedBox(height: 8),
-                Text(isLogin ? 'Build your focus.' : 'Start building your focus.', style: TextStyle(fontSize: 16, color: Colors.black.withOpacity(0.6))),
+                Text(isLogin ? 'Build your focus.' : 'Start building your focus.', style: TextStyle(fontSize: 16, color: Colors.black.withValues(alpha: 0.6))),
                 const SizedBox(height: 48),
                 if (!isLogin) ...[
                   TextField(controller: nameController, decoration: _authInputStyle('Full Name', Icons.person_outline)),
                   const SizedBox(height: 20),
                 ],
-                // Input diubah pakai email dan password controller khusus
                 TextField(controller: emailController, keyboardType: TextInputType.emailAddress, decoration: _authInputStyle('Email Address', Icons.alternate_email)),
                 const SizedBox(height: 20),
                 TextField(controller: passwordController, obscureText: true, decoration: _authInputStyle('Password', Icons.lock_outline)),
@@ -595,18 +641,18 @@ class _AuthScreenState extends State<AuthScreen> {
 
   InputDecoration _authInputStyle(String label, IconData icon) {
     return InputDecoration(
-      labelText: label, labelStyle: TextStyle(color: Colors.black.withOpacity(0.6)), filled: true, fillColor: Colors.white,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.black.withOpacity(0.1))),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.black.withOpacity(0.1))),
+      labelText: label, labelStyle: TextStyle(color: Colors.black.withValues(alpha: 0.6)), filled: true, fillColor: Colors.white,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.1))),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.1))),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Colors.black, width: 1.5)),
       prefixIcon: Icon(icon, color: Colors.black54),
     );
   }
 }
 
-// ==========================================
+// ===============
 // 4. HOME SCREEN
-// ==========================================
+// ===============
 class HomeScreen extends StatefulWidget {
   final String userName;
   const HomeScreen({super.key, required this.userName});
@@ -623,6 +669,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final platform = const MethodChannel('com.classguard/applock');
 
   Timer? _minuteTimer;
+  List<int> _activeAlarmIds = [];
+  List<QueryDocumentSnapshot> _currentSchedules = [];
 
   @override
   void initState() {
@@ -630,60 +678,100 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadProfileName();
     FlutterLocalNotificationsPlugin().resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
 
-    _schedulesStream = FirebaseFirestore.instance.collection('schedules').snapshots();
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
+    _schedulesStream = FirebaseFirestore.instance.collection('schedules')
+        .where('joinedStudents', arrayContains: uid)
+        .snapshots();
 
     _scheduleSubscription = _schedulesStream.listen((snapshot) async {
       _recalculateAlarms(snapshot.docs);
-
-      final now = DateTime.now();
-      final dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
-      int currentMins = now.hour * 60 + now.minute;
-
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      bool foundActive = false;
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        if (data['isActive'] == true && data['day'] == dayStr) {
-          int start = timeToMinutes(data['startTime'] ?? "00:00");
-          int end = timeToMinutes(data['endTime'] ?? "00:00");
-
-          if (currentMins >= start && currentMins <= end) {
-            bool wasActive = prefs.getBool('isAppLockActive') ?? false;
-            if (!wasActive) {
-              Fluttertoast.showToast(msg: "Class started: Device is Silent & Distracting Apps Locked", toastLength: Toast.LENGTH_LONG);
-            }
-
-            List<dynamic> apps = data['blockedApps'] ?? [];
-            await prefs.setString('blockedApps', apps.join(','));
-            await prefs.setInt('allowanceTime', data['allowanceTime'] ?? 2);
-            await prefs.setString('securityPIN', data['securityPIN'] ?? "1234");
-            await prefs.setString('allowedApp', data['allowedApp'] ?? "");
-            await prefs.setInt('allowedUntil', data['allowedUntil'] ?? 0);
-            await prefs.setBool('isAppLockActive', data['isAppLockEnabled'] ?? true);
-
-            foundActive = true;
-            break;
-          }
-        }
-      }
-
-      if (!foundActive) {
-        bool wasActive = prefs.getBool('isAppLockActive') ?? false;
-        if (wasActive) {
-          Fluttertoast.showToast(msg: "Class ended: Device is back to normal", toastLength: Toast.LENGTH_LONG);
-        }
-        await prefs.setBool('isAppLockActive', false);
-      }
+      _currentSchedules = snapshot.docs;
+      _checkSchedulesState();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowPermissionWarning();
     });
 
-    _minuteTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (mounted) setState(() {});
+    _minuteTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) {
+        setState(() {});
+        _checkSchedulesState();
+      }
     });
+  }
+
+  Future<void> _checkSchedulesState() async {
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    final now = DateTime.now();
+    final dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
+    int currentMins = now.hour * 60 + now.minute;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool foundActive = false;
+
+    for (var doc in _currentSchedules) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['isActive'] == true && data['day'] == dayStr) {
+        int start = timeToMinutes(data['startTime'] ?? "00:00");
+        int end = timeToMinutes(data['endTime'] ?? "00:00");
+
+        if (currentMins >= start && currentMins < end) {
+          if (data['role'] == 'Teacher' && data['userId'] == uid) {
+            continue;
+          }
+
+          bool wasActive = prefs.getBool('isAppLockActive') ?? false;
+          if (!wasActive) {
+            double currentVol = await VolumeController().getVolume();
+            await prefs.setDouble('prevVolume', currentVol);
+
+            if (data['isSilentModeEnabled'] == true) {
+              try {
+                await SoundMode.setSoundMode(RingerModeStatus.silent);
+                await Future.delayed(const Duration(milliseconds: 500));
+                VolumeController().setVolume(0.0);
+              } catch (e) {}
+            }
+            Fluttertoast.showToast(msg: "Class started: Device is Silent & Distracting Apps Locked", toastLength: Toast.LENGTH_LONG);
+          }
+
+          List<dynamic> apps = data['blockedApps'] ?? [];
+          await prefs.setString('blockedApps', apps.join(','));
+          await prefs.setInt('allowanceTime', data['allowanceTime'] ?? 2);
+          await prefs.setString('securityPIN', data['securityPIN'] ?? "1234");
+          await prefs.setBool('isAppLockActive', data['isAppLockEnabled'] ?? true);
+
+          Map<String, dynamic> vipAccess = data['vipAccess'] ?? {};
+          var myVip = vipAccess[uid];
+          if (myVip != null) {
+            await prefs.setString('allowedApp', myVip['app']);
+            await prefs.setInt('allowedUntil', myVip['until']);
+          } else {
+            await prefs.setString('allowedApp', "");
+            await prefs.setInt('allowedUntil', 0);
+          }
+
+          foundActive = true;
+          break;
+        }
+      }
+    }
+
+    if (!foundActive) {
+      bool wasActive = prefs.getBool('isAppLockActive') ?? false;
+      if (wasActive) {
+        double prevVol = prefs.getDouble('prevVolume') ?? 0.5;
+        try {
+          await SoundMode.setSoundMode(RingerModeStatus.normal);
+          await Future.delayed(const Duration(milliseconds: 500));
+          VolumeController().setVolume(prevVol);
+        } catch (e) {}
+        Fluttertoast.showToast(msg: "Class ended: Device is back to normal", toastLength: Toast.LENGTH_LONG);
+      }
+      await prefs.setBool('isAppLockActive', false);
+    }
   }
 
   Future<void> _loadProfileName() async {
@@ -754,7 +842,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ElevatedButton(
                       onPressed: () {
                         Navigator.pop(context);
-                        Navigator.push(context, _createRoute(const PermissionOnboardingScreen(isFromSettings: true)));
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const PermissionOnboardingScreen(isFromSettings: true)));
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 12)),
                       child: const Text('Enable Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -775,20 +863,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _recalculateAlarms(List<QueryDocumentSnapshot> docs) {
+    for (var id in _activeAlarmIds) {
+      AndroidAlarmManager.cancel(id);
+      platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': id});
+    }
+    _activeAlarmIds.clear();
+
     for (var doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
       if (data['isActive'] == true && data['isSilentModeEnabled'] == true) {
         String startTime = data['startTime'] ?? "00:00";
         String endTime = data['endTime'] ?? "00:00";
 
-        _setAutomaticAlarm(startTime, doc.id.hashCode, startClassGuard, "Focus Mode Active", "Class session has started. Your phone is muted and distracting apps are locked.");
-        _setAutomaticAlarm(endTime, doc.id.hashCode + 1, stopClassGuard, "Focus Mode Ended", "Great job! Class session has ended. Your phone is back to normal.");
-      } else {
-        AndroidAlarmManager.cancel(doc.id.hashCode);
-        AndroidAlarmManager.cancel(doc.id.hashCode + 1);
+        int startId = doc.id.hashCode;
+        int endId = doc.id.hashCode + 1;
 
-        platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': doc.id.hashCode});
-        platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': doc.id.hashCode + 1});
+        _setAutomaticAlarm(startTime, startId, startClassGuard, "Focus Mode Active", "Class session has started. Your phone is muted and distracting apps are locked.");
+        _setAutomaticAlarm(endTime, endId, stopClassGuard, "Focus Mode Ended", "Great job! Class session has ended. Your phone is back to normal.");
+
+        _activeAlarmIds.addAll([startId, endId]);
       }
     }
   }
@@ -831,11 +924,10 @@ class _HomeScreenState extends State<HomeScreen> {
     int startMins = timeToMinutes(course.startTime);
     int endMins = timeToMinutes(course.endTime);
 
-    return currentMins >= startMins && currentMins <= endMins;
+    return currentMins >= startMins && currentMins < endMins;
   }
 
   Widget _buildExpandedCard(Course course) {
-    bool isOwner = course.role == 'Personal' || course.role == 'Teacher';
     bool isRunning = _isCourseCurrentlyRunning(course);
 
     return AnimatedContainer(
@@ -847,7 +939,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: Colors.black,
           borderRadius: BorderRadius.circular(24),
           border: isRunning ? Border.all(color: Colors.greenAccent, width: 2) : null,
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 10))]
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 10))]
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -856,7 +948,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: isRunning ? Colors.greenAccent.withOpacity(0.2) : Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(color: isRunning ? Colors.greenAccent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
                   child: Text(isRunning ? 'ACTIVE NOW' : '${course.day.toUpperCase()} • ${course.role.toUpperCase()}', style: TextStyle(color: isRunning ? Colors.greenAccent : Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1))
               ),
               const Spacer(),
@@ -868,11 +960,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red);
                         return;
                       }
-                      if (!isOwner) {
+                      if (!course.isOwner) {
                         Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87);
                         return;
                       }
-                      FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isSilentModeEnabled': !course.isSilentModeEnabled});
+                      setState(() { course.isSilentModeEnabled = !course.isSilentModeEnabled; });
+                      FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isSilentModeEnabled': course.isSilentModeEnabled});
                     },
                     child: Padding(padding: const EdgeInsets.all(8.0), child: Icon(course.isSilentModeEnabled ? Icons.volume_off : Icons.volume_up, color: course.isSilentModeEnabled ? Colors.white : Colors.white38, size: 20)),
                   ),
@@ -882,35 +975,46 @@ class _HomeScreenState extends State<HomeScreen> {
                         Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red);
                         return;
                       }
-                      if (!isOwner) {
+                      if (!course.isOwner) {
                         Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87);
                         return;
                       }
-                      FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isAppLockEnabled': !course.isAppLockEnabled});
+                      setState(() { course.isAppLockEnabled = !course.isAppLockEnabled; });
+                      FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isAppLockEnabled': course.isAppLockEnabled});
                     },
                     child: Padding(padding: const EdgeInsets.all(8.0), child: Icon(course.isAppLockEnabled ? Icons.lock_outline : Icons.lock_open_outlined, color: course.isAppLockEnabled ? Colors.white : Colors.white38, size: 20)),
                   ),
                   PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: (isRunning && course.role != 'Teacher') ? Colors.white24 : Colors.white70),
-                    onSelected: (value) {
-                      if (isRunning && course.role != 'Teacher') {
+                    icon: Icon(Icons.more_vert, color: (isRunning && !course.isOwner) ? Colors.white24 : Colors.white70),
+                    onSelected: (value) async {
+                      if (isRunning && !course.isOwner) {
                         Fluttertoast.showToast(msg: "Class is running. Action blocked.", backgroundColor: Colors.red);
                         return;
                       }
                       if (value == 'edit') {
-                        Navigator.push(context, _createRoute(AddScheduleScreen(courseToEdit: course)));
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => AddScheduleScreen(courseToEdit: course)));
                       } else if (value == 'delete') {
-                        AndroidAlarmManager.cancel(course.id.hashCode);
-                        AndroidAlarmManager.cancel(course.id.hashCode + 1);
-                        platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': course.id.hashCode});
-                        platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': course.id.hashCode + 1});
-                        FirebaseFirestore.instance.collection('schedules').doc(course.id).delete();
+                        if (isRunning) {
+                          Fluttertoast.showToast(msg: "Class is running. Cannot delete.", backgroundColor: Colors.red);
+                          return;
+                        }
+                        String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                        if (course.isOwner) {
+                          FirebaseFirestore.instance.collection('schedules').doc(course.id).delete();
+                        } else {
+                          FirebaseFirestore.instance.collection('schedules').doc(course.id).update({
+                            'joinedStudents': FieldValue.arrayRemove([uid]),
+                            'studentNames.$uid': FieldValue.delete(),
+                            'joinTimes.$uid': FieldValue.delete(),
+                            'vipAccess.$uid': FieldValue.delete(),
+                          });
+                        }
                       }
                     },
                     itemBuilder: (context) => [
-                      if (isOwner && (!isRunning || course.role == 'Teacher')) const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                      if (!isRunning) const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                      if (isRunning && course.role != 'Teacher') const PopupMenuItem(value: 'locked', child: Text('Locked during class', style: TextStyle(color: Colors.grey))),
+                      if (course.isOwner && (!isRunning || course.role == 'Teacher')) const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      if (!isRunning) PopupMenuItem(value: 'delete', child: Text(course.isOwner ? 'Delete' : 'Leave Classroom', style: const TextStyle(color: Colors.red))),
+                      if (isRunning && !course.isOwner) const PopupMenuItem(value: 'locked', child: Text('Locked during class', style: TextStyle(color: Colors.grey))),
                     ],
                   )
                 ],
@@ -932,31 +1036,40 @@ class _HomeScreenState extends State<HomeScreen> {
                 activeTrackColor: Colors.white,
                 inactiveTrackColor: Colors.white24,
                 onChanged: (val) async {
-                  if (isRunning) {
-                    Fluttertoast.showToast(msg: "Cannot turn off an active running class.", backgroundColor: Colors.red);
+                  if (isRunning && val == false) {
+                    Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red);
+                    return;
+                  }
+                  if (!course.isOwner) {
+                    Fluttertoast.showToast(msg: "Only the teacher can toggle this room.", backgroundColor: Colors.red);
                     return;
                   }
                   if (val == true) {
                     String? error = await checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
-                    if (error != null && error != "OVERRIDDEN") {
-                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-                      return;
+                    if (error != null) {
+                      if (error == "OVERRIDDEN") {
+                        Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
+                      } else {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                        return;
+                      }
                     }
                   }
-                  await FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isActive': val});
+                  setState(() { course.isActive = val; });
+                  FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isActive': val});
                 },
               )
             ],
           ),
-          if (course.role == 'Teacher') ...[
+          if (course.role == 'Teacher' && course.isOwner) ...[
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
               height: 48,
               child: ElevatedButton.icon(
-                onPressed: () => Navigator.push(context, _createRoute(TeacherDashboardScreen(course: course))),
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => TeacherDashboardScreen(course: course))),
                 icon: const Icon(Icons.admin_panel_settings, size: 20),
-                label: const Text('Open Teacher Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+                label: const Text('Open Classroom Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
               ),
             )
@@ -977,7 +1090,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isRunning ? Colors.greenAccent : Colors.black.withOpacity(0.1), width: isRunning ? 2.0 : 1.0),
+        border: Border.all(color: isRunning ? Colors.greenAccent : Colors.black.withValues(alpha: 0.1), width: isRunning ? 2.0 : 1.0),
       ),
       child: Row(
         children: [
@@ -998,41 +1111,60 @@ class _HomeScreenState extends State<HomeScreen> {
             activeColor: Colors.white,
             activeTrackColor: Colors.black87,
             onChanged: (val) async {
-              if (isRunning) {
-                Fluttertoast.showToast(msg: "Cannot turn off an active running class.", backgroundColor: Colors.red);
+              if (isRunning && val == false) {
+                Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red);
+                return;
+              }
+              if (!course.isOwner) {
+                Fluttertoast.showToast(msg: "Only the teacher can toggle this.", backgroundColor: Colors.black87);
                 return;
               }
               if (val == true) {
                 String? error = await checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
-                if (error != null && error != "OVERRIDDEN") {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-                  return;
+                if (error != null) {
+                  if (error == "OVERRIDDEN") {
+                    Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
+                  } else {
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                    return;
+                  }
                 }
               }
-              await FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isActive': val});
+              setState(() { course.isActive = val; });
+              FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isActive': val});
             },
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: (isRunning && course.role != 'Teacher') ? Colors.black26 : Colors.black87),
-            onSelected: (value) {
-              if (isRunning && course.role != 'Teacher') {
+            icon: Icon(Icons.more_vert, color: (isRunning && !course.isOwner) ? Colors.black26 : Colors.black87),
+            onSelected: (value) async {
+              if (isRunning && !course.isOwner) {
                 Fluttertoast.showToast(msg: "Class is running. Action blocked.", backgroundColor: Colors.red);
                 return;
               }
               if (value == 'edit') {
-                Navigator.push(context, _createRoute(AddScheduleScreen(courseToEdit: course)));
+                Navigator.push(context, MaterialPageRoute(builder: (context) => AddScheduleScreen(courseToEdit: course)));
               } else if (value == 'delete') {
-                AndroidAlarmManager.cancel(course.id.hashCode);
-                AndroidAlarmManager.cancel(course.id.hashCode + 1);
-                platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': course.id.hashCode});
-                platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': course.id.hashCode + 1});
-                FirebaseFirestore.instance.collection('schedules').doc(course.id).delete();
+                if (isRunning) {
+                  Fluttertoast.showToast(msg: "Class is running. Cannot delete.", backgroundColor: Colors.red);
+                  return;
+                }
+                String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                if (course.isOwner) {
+                  FirebaseFirestore.instance.collection('schedules').doc(course.id).delete();
+                } else {
+                  FirebaseFirestore.instance.collection('schedules').doc(course.id).update({
+                    'joinedStudents': FieldValue.arrayRemove([uid]),
+                    'studentNames.$uid': FieldValue.delete(),
+                    'joinTimes.$uid': FieldValue.delete(),
+                    'vipAccess.$uid': FieldValue.delete(),
+                  });
+                }
               }
             },
             itemBuilder: (context) => [
-              if (course.role != 'Student' && (!isRunning || course.role == 'Teacher')) const PopupMenuItem(value: 'edit', child: Text('Edit')),
-              if (!isRunning) const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.redAccent))),
-              if (isRunning && course.role != 'Teacher') const PopupMenuItem(value: 'locked', child: Text('Locked during class', style: TextStyle(color: Colors.grey))),
+              if (course.isOwner && (!isRunning || course.role == 'Teacher')) const PopupMenuItem(value: 'edit', child: Text('Edit')),
+              if (!isRunning) PopupMenuItem(value: 'delete', child: Text(course.isOwner ? 'Delete' : 'Leave Classroom', style: const TextStyle(color: Colors.redAccent))),
+              if (isRunning && !course.isOwner) const PopupMenuItem(value: 'locked', child: Text('Locked during class', style: TextStyle(color: Colors.grey))),
             ],
           )
         ],
@@ -1049,9 +1181,16 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.black));
 
+          String currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
           final docs = snapshot.data?.docs ?? [];
+
           List<Course> courseList = docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
+            bool isOwner = data['userId'] == currentUid;
+            String originalRole = data['role'] ?? 'Personal';
+
+            String displayRole = (originalRole == 'Teacher' && !isOwner) ? 'Student' : originalRole;
+
             return Course(
               id: doc.id,
               subject: data['subject'] ?? '-',
@@ -1063,11 +1202,12 @@ class _HomeScreenState extends State<HomeScreen> {
               isAppLockEnabled: data['isAppLockEnabled'] ?? false,
               isSilentModeEnabled: data['isSilentModeEnabled'] ?? false,
               isActive: data['isActive'] ?? true,
-              role: data['role'] ?? 'Personal',
+              role: displayRole,
               roomCode: data['roomCode'],
               securityPIN: data['securityPIN'],
               allowanceTime: data['allowanceTime'] ?? 0,
               blockedApps: data['blockedApps'] ?? [],
+              isOwner: isOwner,
             );
           }).toList();
 
@@ -1083,7 +1223,7 @@ class _HomeScreenState extends State<HomeScreen> {
             slivers: [
               SliverAppBar(
                 pinned: true,
-                backgroundColor: Colors.white.withOpacity(0.95),
+                backgroundColor: Colors.white.withValues(alpha: 0.95),
                 surfaceTintColor: Colors.transparent,
                 elevation: 0,
                 toolbarHeight: 90,
@@ -1098,12 +1238,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         Text('Hello, ${_displayName.isNotEmpty ? _displayName : widget.userName}!', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87, letterSpacing: -0.5)),
                         const SizedBox(height: 4),
-                        Text(_getFormattedDate(), style: TextStyle(fontSize: 14, color: Colors.black.withOpacity(0.5), fontWeight: FontWeight.w600)),
+                        Text(_getFormattedDate(), style: TextStyle(fontSize: 14, color: Colors.black.withValues(alpha: 0.5), fontWeight: FontWeight.w600)),
                       ],
                     ),
                     InkWell(
                       onTap: () {
-                        Navigator.push(context, _createRoute(const SettingsScreen())).then((_) => _loadProfileName());
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())).then((_) => _loadProfileName());
                       },
                       borderRadius: BorderRadius.circular(30),
                       child: Container(
@@ -1111,7 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.0),
+                          border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1.0),
                         ),
                         child: const Icon(Icons.settings, color: Colors.black87, size: 24),
                       ),
@@ -1134,8 +1274,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             builder: (context, val, child) => Opacity(opacity: val, child: child),
                             child: Container(
                               width: double.infinity, padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 10))]),
-                              child: const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('No schedules yet. Tap + to add schedule or join a room.', style: TextStyle(color: Colors.white70, height: 1.5), textAlign: TextAlign.center)),
+                              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 10))]),
+                              child: const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('No schedules yet. Tap + to add schedule or join a classroom.', style: TextStyle(color: Colors.white70, height: 1.5), textAlign: TextAlign.center)),
                             ),
                           ),
                         );
@@ -1164,7 +1304,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           }
 
                           if (index == 1) {
-                            if (courseList.length == 1) return Padding(padding: const EdgeInsets.only(top: 32, bottom: 16), child: Center(child: Text('No other schedules', style: TextStyle(color: Colors.black.withOpacity(0.3)))));
+                            if (courseList.length == 1) return Padding(padding: const EdgeInsets.only(top: 32, bottom: 16), child: Center(child: Text('No other schedules', style: TextStyle(color: Colors.black.withValues(alpha: 0.3)))));
                             return const Padding(padding: EdgeInsets.only(top: 16, bottom: 16), child: Text('Other Schedules', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)));
                           }
 
@@ -1208,21 +1348,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 16),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.calendar_month, color: Colors.black87)),
+                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.calendar_month, color: Colors.black87)),
                         title: const Text('Add Schedule', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('Your personal routine', style: TextStyle(fontSize: 12)),
-                        onTap: () { Navigator.pop(context); Navigator.push(context, _createRoute(const AddScheduleScreen())); },
+                        onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const AddScheduleScreen())); },
                       ),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.add_box_outlined, color: Colors.black87)),
-                        title: const Text('Create Room', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('As a Teacher', style: TextStyle(fontSize: 12)),
-                        onTap: () { Navigator.pop(context); Navigator.push(context, _createRoute(const CreateRoomScreen())); },
+                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.add_box_outlined, color: Colors.black87)),
+                        title: const Text('Create Classroom', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('As a Teacher', style: TextStyle(fontSize: 12)),
+                        onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateRoomScreen())); },
                       ),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.login, color: Colors.black87)),
-                        title: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('As a Student', style: TextStyle(fontSize: 12)),
-                        onTap: () { Navigator.pop(context); Navigator.push(context, _createRoute(JoinRoomScreen(userName: _displayName.isNotEmpty ? _displayName : widget.userName))); },
+                        leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.login, color: Colors.black87)),
+                        title: const Text('Join Classroom', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('As a Student', style: TextStyle(fontSize: 12)),
+                        onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => JoinRoomScreen(userName: _displayName.isNotEmpty ? _displayName : widget.userName))); },
                       ),
                     ],
                   ),
@@ -1240,21 +1380,35 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==========================================
-// 4.1 TEACHER DASHBOARD (VIP PERMISSION SYSTEM)
-// ==========================================
+// ========================
+// 4.1 CLASSROOM DASHBOARD
+// ========================
 class TeacherDashboardScreen extends StatelessWidget {
   final Course course;
   const TeacherDashboardScreen({super.key, required this.course});
 
-  void _showGrantAccessDialog(BuildContext context, String studentDocId, String studentName) {
-    if (course.blockedApps.isEmpty) {
-      Fluttertoast.showToast(msg: "No apps are blocked in this room.");
+  String _getCleanAppName(String packageName) {
+    if (packageName == "all") return "All Applications";
+    List<String> parts = packageName.split('.');
+    parts.removeWhere((part) => ['com', 'org', 'net', 'co', 'id', 'www', 'android', 'app'].contains(part.toLowerCase()));
+    if (parts.isEmpty) parts = [packageName.split('.').last];
+    return parts.map((word) => word.isEmpty ? "" : word[0].toUpperCase() + word.substring(1).toLowerCase()).join(' ');
+  }
+
+  int _timeToMins(String timeStr) {
+    final parts = timeStr.split(':');
+    if (parts.length != 2) return 0;
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
+
+  void _showGrantAccessDialog(BuildContext context, String studentUid, String studentName, List<dynamic> blockedApps) {
+    if (blockedApps.isEmpty) {
+      Fluttertoast.showToast(msg: "No apps are blocked in this classroom.");
       return;
     }
-
-    String selectedApp = course.blockedApps.first.toString();
+    String selectedApp = "all";
     int selectedMins = 5;
+    TextEditingController customMinController = TextEditingController();
 
     showDialog(
         context: context,
@@ -1263,71 +1417,104 @@ class TeacherDashboardScreen extends StatelessWidget {
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: const Text('Grant VIP Access', style: TextStyle(fontWeight: FontWeight.bold)),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Allow $studentName to access a specific blocked app.', style: const TextStyle(fontSize: 14)),
-                  const SizedBox(height: 24),
-                  const Text('Select App', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(12)),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        isExpanded: true,
-                        value: selectedApp,
-                        items: course.blockedApps.map((app) {
-                          String cleanName = app.toString();
-                          if (cleanName.contains("whatsapp")) cleanName = "WhatsApp";
-                          else if (cleanName.contains("instagram")) cleanName = "Instagram";
-                          else if (cleanName.contains("tiktok") || cleanName.contains("musically")) cleanName = "TikTok";
-                          else if (cleanName.contains("mobile.legends")) cleanName = "Mobile Legends";
-                          else if (cleanName.contains("facebook")) cleanName = "Facebook";
-
-                          return DropdownMenuItem<String>(
-                            value: app.toString(),
-                            child: Text(cleanName),
-                          );
-                        }).toList(),
-                        onChanged: (val) => setState(() => selectedApp = val!),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Allow $studentName to access blocked app(s).', style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 24),
+                    const Text('Select App', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(12)),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: selectedApp,
+                          items: [
+                            const DropdownMenuItem<String>(
+                              value: "all",
+                              child: Text("All Applications", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                            ),
+                            ...blockedApps.map((app) {
+                              return DropdownMenuItem<String>(
+                                value: app.toString(),
+                                child: Text(_getCleanAppName(app.toString())),
+                              );
+                            })
+                          ],
+                          onChanged: (val) => setState(() => selectedApp = val!),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('Duration (Minutes)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [1, 5, 10, 15].map((min) => GestureDetector(
-                      onTap: () => setState(() => selectedMins = min),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                            color: selectedMins == min ? Colors.black : Colors.white,
-                            border: Border.all(color: selectedMins == min ? Colors.black : Colors.black12),
-                            borderRadius: BorderRadius.circular(10)
+                    const SizedBox(height: 24),
+                    const Text('Duration (Minutes)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [1, 5, 10, 15].map((min) => GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            selectedMins = min;
+                            customMinController.clear();
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                              color: (selectedMins == min && customMinController.text.isEmpty) ? Colors.black : Colors.white,
+                              border: Border.all(color: (selectedMins == min && customMinController.text.isEmpty) ? Colors.black : Colors.black12),
+                              borderRadius: BorderRadius.circular(10)
+                          ),
+                          child: Text('$min', style: TextStyle(color: (selectedMins == min && customMinController.text.isEmpty) ? Colors.white : Colors.black87, fontWeight: FontWeight.bold)),
                         ),
-                        child: Text('$min', style: TextStyle(color: selectedMins == min ? Colors.white : Colors.black87, fontWeight: FontWeight.bold)),
+                      )).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Or Custom Minute:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: customMinController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        hintText: "Enter custom minutes...",
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.black12)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.black)),
                       ),
-                    )).toList(),
-                  )
-                ],
+                      onChanged: (val) {
+                        setState(() {
+                          if (val.isNotEmpty) {
+                            selectedMins = int.tryParse(val) ?? 5;
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.black54))),
                 ElevatedButton(
                   onPressed: () async {
-                    int unlockMillis = DateTime.now().millisecondsSinceEpoch + (selectedMins * 60 * 1000);
-                    await FirebaseFirestore.instance.collection('schedules').doc(studentDocId).update({
-                      'allowedApp': selectedApp,
-                      'allowedUntil': unlockMillis
+                    int finalMins = selectedMins;
+                    if (customMinController.text.isNotEmpty) {
+                      finalMins = int.tryParse(customMinController.text) ?? selectedMins;
+                    }
+
+                    int unlockMillis = DateTime.now().millisecondsSinceEpoch + (finalMins * 60 * 1000);
+                    FirebaseFirestore.instance.collection('schedules').doc(course.id).update({
+                      'vipAccess.$studentUid': {
+                        'app': selectedApp,
+                        'until': unlockMillis
+                      }
                     });
                     if (context.mounted) {
                       Navigator.pop(context);
-                      Fluttertoast.showToast(msg: "Access granted for $selectedMins minutes!");
+                      Fluttertoast.showToast(msg: "Access granted for $finalMins minutes!");
                     }
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
@@ -1339,7 +1526,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     );
   }
 
-  void _showStudentsList(BuildContext context) {
+  void _showStudentsList(BuildContext context, Map<String, dynamic> studentNames, Map<String, dynamic> joinTimes, Map<String, dynamic> studentIds, String startTime, List<dynamic> blockedApps) {
     showModalBottomSheet(
         context: context,
         backgroundColor: Colors.white,
@@ -1350,34 +1537,50 @@ class TeacherDashboardScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Students in Room', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('Students in Classroom', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('schedules').where('roomCode', isEqualTo: course.roomCode).where('role', isEqualTo: 'Student').snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.black));
-                      final docs = snapshot.data?.docs ?? [];
-                      if (docs.isEmpty) return Center(child: Text('No students have joined yet.', style: TextStyle(color: Colors.black.withOpacity(0.5))));
+                  child: studentNames.isEmpty ? Center(child: Text('No students have joined yet.', style: TextStyle(color: Colors.black.withValues(alpha: 0.5)))) : ListView.builder(
+                    itemCount: studentNames.length,
+                    itemBuilder: (context, index) {
+                      String studentUid = studentNames.keys.elementAt(index);
+                      String studentName = studentNames[studentUid] ?? 'Student';
+                      String joinTime = joinTimes[studentUid] ?? '';
+                      String idStr = studentIds[studentUid] ?? '-';
 
-                      return ListView.builder(
-                        itemCount: docs.length,
-                        itemBuilder: (context, index) {
-                          var docData = docs[index].data() as Map<String, dynamic>;
-                          String studentName = docData.containsKey('studentName') ? docData['studentName'] : 'Student ${index + 1}';
+                      int startMins = _timeToMins(startTime);
+                      int lateMins = 0;
+                      if (joinTime.isNotEmpty) {
+                        int jMins = _timeToMins(joinTime);
+                        if (jMins > startMins) lateMins = jMins - startMins;
+                      }
 
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const CircleAvatar(backgroundColor: Color(0xFFF5F5F5), child: Icon(Icons.person_outline, color: Colors.black87)),
-                            title: Text(studentName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.key, color: Colors.orange),
-                              tooltip: 'Grant VIP Access',
-                              onPressed: () => _showGrantAccessDialog(context, docs[index].id, studentName),
-                            ),
-                          );
-                        },
+                      Widget subtitleWidget;
+                      if (lateMins > 0) {
+                        subtitleWidget = Row(
+                            children: [
+                              const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                                child: Text('Late $lateMins mins', style: const TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.bold)),
+                              )
+                            ]
+                        );
+                      } else {
+                        subtitleWidget = const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54));
+                      }
+
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const CircleAvatar(backgroundColor: Color(0xFFF5F5F5), child: Icon(Icons.person_outline, color: Colors.black87)),
+                        title: Text('$studentName ($idStr)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: subtitleWidget,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.key, color: Colors.orange),
+                          onPressed: () => _showGrantAccessDialog(context, studentUid, studentName, blockedApps),
+                        ),
                       );
                     },
                   ),
@@ -1389,96 +1592,253 @@ class TeacherDashboardScreen extends StatelessWidget {
     );
   }
 
+  void _showHistory(BuildContext context, List<dynamic> history, String startTime) {
+    showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (context) {
+          return StatefulBuilder(
+              builder: (BuildContext context, StateSetter setStateDialog) {
+                return Container(
+                    padding: const EdgeInsets.all(24), height: 500,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Attendance History', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 16),
+                          Expanded(
+                              child: history.isEmpty ? Center(child: Text('No history available.', style: TextStyle(color: Colors.black.withValues(alpha: 0.5)))) : ListView.builder(
+                                  itemCount: history.length,
+                                  itemBuilder: (context, index) {
+                                    var session = history[history.length - 1 - index];
+                                    DateTime date = DateTime.parse(session['date']);
+                                    String formattedDate = "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
+                                    Map<String, dynamic> students = session['students'] ?? {};
+                                    Map<String, dynamic> joinTimes = session['joinTimes'] ?? {};
+                                    Map<String, dynamic> sessionIds = session['studentIds'] ?? {};
+
+                                    return ExpansionTile(
+                                      title: Text(formattedDate, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                      subtitle: Text('${students.length} students joined'),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                            onPressed: () {
+                                              showDialog(
+                                                context: context,
+                                                builder: (BuildContext dialogContext) {
+                                                  return AlertDialog(
+                                                    backgroundColor: Colors.white,
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                    title: const Text('Delete History', style: TextStyle(fontWeight: FontWeight.bold)),
+                                                    content: const Text('Are you sure you want to delete this attendance record? This action cannot be undone.'),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () => Navigator.pop(dialogContext),
+                                                        child: const Text('Cancel', style: TextStyle(color: Colors.black54)),
+                                                      ),
+                                                      ElevatedButton(
+                                                        onPressed: () {
+                                                          List updatedHistory = List.from(history);
+                                                          updatedHistory.removeAt(history.length - 1 - index);
+                                                          FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'history': updatedHistory});
+                                                          Navigator.pop(dialogContext);
+                                                          Navigator.pop(context);
+                                                          Fluttertoast.showToast(msg: "History record deleted.");
+                                                        },
+                                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                                        child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+                                                      ),
+                                                    ],
+                                                  );
+                                                },
+                                              );
+                                            },
+                                          ),
+                                          const Icon(Icons.expand_more)
+                                        ],
+                                      ),
+                                      children: students.keys.map((uid) {
+                                        String name = students[uid] ?? 'Student';
+                                        String jTime = joinTimes[uid] ?? '';
+                                        String idStr = sessionIds[uid] ?? '-';
+                                        int startMins = _timeToMins(startTime);
+                                        int lateMins = 0;
+                                        if (jTime.isNotEmpty) {
+                                          int jMins = _timeToMins(jTime);
+                                          if (jMins > startMins) lateMins = jMins - startMins;
+                                        }
+                                        return ListTile(
+                                          title: Text('$name ($idStr)', style: const TextStyle(fontSize: 14)),
+                                          trailing: lateMins > 0 ? Text('Late $lateMins mins', style: const TextStyle(color: Colors.red, fontSize: 12)) : const Text('On time', style: TextStyle(color: Colors.green, fontSize: 12)),
+                                        );
+                                      }).toList(),
+                                    );
+                                  }
+                              )
+                          )
+                        ]
+                    )
+                );
+              }
+          );
+        }
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Teacher Dashboard', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity, padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24)),
+      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Classroom Dashboard', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
+      body: StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('schedules').doc(course.id).snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.black));
+
+            var docData = snapshot.data?.data() as Map<String, dynamic>?;
+            if (docData == null) return const Center(child: Text('Classroom data not found.'));
+
+            bool isActive = docData['isActive'] ?? false;
+            final now = DateTime.now();
+            final days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            bool isDayMatch = docData['day'] == days[now.weekday - 1];
+            int currentMins = now.hour * 60 + now.minute;
+            int startMins = _timeToMins(docData['startTime'] ?? "00:00");
+            int endMins = _timeToMins(docData['endTime'] ?? "00:00");
+            bool isTimeRunning = isDayMatch && (currentMins >= startMins && currentMins < endMins);
+
+            bool isCurrentlyActive = isActive && isTimeRunning;
+
+            Map<String, dynamic> studentNames = docData['studentNames'] ?? {};
+            Map<String, dynamic> joinTimes = docData['joinTimes'] ?? {};
+            Map<String, dynamic> studentIds = docData['studentIds'] ?? {};
+            List<dynamic> blockedApps = docData['blockedApps'] ?? [];
+            List<dynamic> history = docData['history'] ?? [];
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(course.subject, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Row(children: [const Icon(Icons.location_on_outlined, size: 16, color: Colors.white70), const SizedBox(width: 4), Text(course.room, style: const TextStyle(color: Colors.white70))]),
-                  const Divider(color: Colors.white24, height: 32),
-                  const Text('SECURITY CREDENTIALS', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Room Code', style: TextStyle(color: Colors.white70, fontSize: 12)), const SizedBox(height: 4), Text(course.roomCode ?? '-', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2))]),
-                      IconButton(onPressed: () { Clipboard.setData(ClipboardData(text: course.roomCode ?? '')); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Code Copied!'))); }, icon: const Icon(Icons.copy, color: Colors.white70))
-                    ],
+                  Container(
+                    width: double.infinity, padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(docData['subject'] ?? '-', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          const Icon(Icons.person_outline, size: 16, color: Colors.white70), const SizedBox(width: 4), Text(docData['lecturer'] ?? '-', style: const TextStyle(color: Colors.white70)),
+                          const SizedBox(width: 12),
+                          const Icon(Icons.location_on_outlined, size: 16, color: Colors.white70), const SizedBox(width: 4), Text(docData['room'] ?? '-', style: const TextStyle(color: Colors.white70))
+                        ]),
+                        const Divider(color: Colors.white24, height: 32),
+                        const Text('SECURITY CREDENTIALS', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Classroom Code', style: TextStyle(color: Colors.white70, fontSize: 12)), const SizedBox(height: 4), Text(docData['roomCode'] ?? '-', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2))]),
+                            IconButton(onPressed: () { Clipboard.setData(ClipboardData(text: docData['roomCode'] ?? '')); Fluttertoast.showToast(msg: "Code Copied!"); }, icon: const Icon(Icons.copy, color: Colors.white70))
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Emergency PIN', style: TextStyle(color: Colors.white70, fontSize: 12)), const SizedBox(height: 4), Text(docData['securityPIN'] ?? '----', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 4))]),
+                            const Icon(Icons.vpn_key_outlined, color: Colors.white70),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Emergency PIN', style: TextStyle(color: Colors.white70, fontSize: 12)), const SizedBox(height: 4), Text(course.securityPIN ?? '----', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 4))]),
-                      const Icon(Icons.vpn_key_outlined, color: Colors.white70),
-                    ],
+                  const SizedBox(height: 32),
+                  const Text('SESSION INFO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () => _showStudentsList(context, studentNames, joinTimes, studentIds, docData['startTime'] ?? "00:00", blockedApps),
+                    child: Container(
+                      padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.black.withValues(alpha: 0.1))),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.groups_outlined, color: Colors.black87), const SizedBox(width: 16),
+                          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Students Joined', style: TextStyle(fontWeight: FontWeight.bold)), Text('Tap to grant app access / view list', style: TextStyle(fontSize: 12, color: Colors.black54))])),
+                          Row(children: [Text('${studentNames.length}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), const SizedBox(width: 8), const Icon(Icons.chevron_right, color: Colors.black26)]),
+                        ],
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () => _showHistory(context, history, docData['startTime'] ?? "00:00"),
+                    child: Container(
+                      padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.black.withValues(alpha: 0.1))),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.history, color: Colors.black87), const SizedBox(width: 16),
+                          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Attendance History', style: TextStyle(fontWeight: FontWeight.bold)), Text('View previous sessions', style: TextStyle(fontSize: 12, color: Colors.black54))])),
+                          Row(children: [Text('${history.length}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), const SizedBox(width: 8), const Icon(Icons.chevron_right, color: Colors.black26)]),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+                  SizedBox(
+                    width: double.infinity, height: 56,
+                    child: ElevatedButton(
+                      onPressed: isCurrentlyActive ? () {
+                        String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                        if (studentNames.isNotEmpty) {
+                          String formattedDate = DateTime.now().toIso8601String();
+                          FirebaseFirestore.instance.collection('schedules').doc(course.id).update({
+                            'history': FieldValue.arrayUnion([{
+                              'date': formattedDate,
+                              'students': studentNames,
+                              'studentIds': studentIds,
+                              'joinTimes': joinTimes
+                            }])
+                          });
+                        }
+
+                        FirebaseFirestore.instance.collection('schedules').doc(course.id).update({
+                          'isActive': false,
+                          'joinedStudents': [uid],
+                          'studentNames': {},
+                          'studentIds': {},
+                          'joinTimes': {},
+                          'vipAccess': {}
+                        });
+
+                        Fluttertoast.showToast(msg: "Class Session Ended. All student devices unlocked.");
+                        Navigator.pop(context);
+                      } : null,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: isCurrentlyActive ? Colors.transparent : Colors.grey.shade100,
+                          foregroundColor: isCurrentlyActive ? Colors.redAccent : Colors.grey,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          side: BorderSide(color: isCurrentlyActive ? Colors.redAccent : Colors.transparent, width: 1)
+                      ),
+                      child: const Text('Session Ended', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                  )
                 ],
               ),
-            ),
-            const SizedBox(height: 32),
-            const Text('SESSION INFO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () => _showStudentsList(context),
-              child: Container(
-                padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.black.withOpacity(0.1))),
-                child: Row(
-                  children: [
-                    const Icon(Icons.groups_outlined, color: Colors.black87), const SizedBox(width: 16),
-                    const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Students Joined', style: TextStyle(fontWeight: FontWeight.bold)), Text('Tap to grant app access / view list', style: TextStyle(fontSize: 12, color: Colors.black54))])),
-                    StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance.collection('schedules').where('roomCode', isEqualTo: course.roomCode).where('role', isEqualTo: 'Student').snapshots(),
-                      builder: (context, snapshot) {
-                        int count = snapshot.data?.docs.length ?? 0;
-                        return Row(children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), const SizedBox(width: 8), const Icon(Icons.chevron_right, color: Colors.black26)]);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 48),
-            SizedBox(
-              width: double.infinity, height: 56,
-              child: ElevatedButton(
-                onPressed: () async {
-                  await FirebaseFirestore.instance.collection('schedules').doc(course.id).update({'isActive': false});
-                  final snapshot = await FirebaseFirestore.instance.collection('schedules').where('roomCode', isEqualTo: course.roomCode).get();
-                  for(var doc in snapshot.docs) {
-                    await FirebaseFirestore.instance.collection('schedules').doc(doc.id).update({'isActive': false});
-                  }
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Class Session Ended. All student devices unlocked.')));
-                    Navigator.pop(context);
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, foregroundColor: Colors.redAccent, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), side: const BorderSide(color: Colors.redAccent, width: 1)),
-                child: const Text('End Class Session', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
-            )
-          ],
-        ),
+            );
+          }
       ),
     );
   }
 }
 
-// ==========================================
+// ===================
 // 5. SETTINGS SCREEN
-// ==========================================
+// ===================
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -1492,21 +1852,90 @@ class SettingsScreen extends StatelessWidget {
         children: [
           const Text('Account', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black54)),
           const SizedBox(height: 12),
-          _buildSettingItem(Icons.person_outline, 'Edit Profile', 'Name, Student ID, Email', onTap: () => Navigator.push(context, _createRoute(const EditProfileScreen()))),
+          _buildSettingItem(Icons.person_outline, 'Edit Profile', 'Name, Student ID, Email, Photo', onTap: () => Navigator.push(context, _createRoute(const EditProfileScreen()))),
           const SizedBox(height: 32),
           const Text('System', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black54)),
           const SizedBox(height: 12),
           _buildSettingItem(Icons.security_outlined, 'System Permissions', 'Accessibility, DND, Overlay', onTap: () => Navigator.push(context, _createRoute(const PermissionOnboardingScreen(isFromSettings: true)))),
           _buildSettingItem(Icons.help_outline, 'How to Use ClassGuard', 'Learn how to setup focus schedules', onTap: () {
-            showDialog(context: context, builder: (context) => AlertDialog(backgroundColor: Colors.white, title: const Text('How to Use', style: TextStyle(fontWeight: FontWeight.bold)), content: const Text('1. Create a Personal schedule or Teacher Room.\n2. Select apps you want to block during that time.\n3. Set allowance time (in minutes) for emergencies.\n4. ClassGuard will automatically mute media and lock apps based on your schedule.', style: TextStyle(height: 1.5)), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Understood', style: TextStyle(color: Colors.black)))]));
+            showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (context) => Container(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('How to Use ClassGuard', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 16),
+                          const ExpansionTile(
+                              title: Text('Personal Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
+                              children: [
+                                Padding(padding: EdgeInsets.all(16.0), child: Text('1. Go to Home and tap the + button.\n2. Select "Add Schedule".\n3. Set your day, time, and choose apps to block.\n4. Save, and your phone will auto-lock those apps on schedule.', style: TextStyle(height: 1.5)))
+                              ]
+                          ),
+                          const ExpansionTile(
+                              title: Text('Classroom', style: TextStyle(fontWeight: FontWeight.bold)),
+                              children: [
+                                Padding(padding: EdgeInsets.all(16.0), child: Text('As a Teacher:\nTap + and select "Create Classroom". Share the generated code with your students.\n\nAs a Student:\nTap + and select "Join Classroom". Enter the code to sync your device with the teacher\'s rules.', style: TextStyle(height: 1.5)))
+                              ]
+                          )
+                        ]
+                    )
+                )
+            );
           }),
 
-          _buildSettingItem(Icons.info_outline, 'About ClassGuard', 'Version 1.2.0'),
+          _buildSettingItem(Icons.info_outline, 'About ClassGuard', 'Version 1.0.0'),
           const SizedBox(height: 8),
           ListTile(
-            onTap: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            onTap: () async {
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
+              final now = DateTime.now();
+              final dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
+              int currentMins = now.hour * 60 + now.minute;
+
+              final snapshot = await FirebaseFirestore.instance.collection('schedules')
+                  .where('joinedStudents', arrayContains: uid)
+                  .where('isActive', isEqualTo: true).get();
+
+              bool isClassRunning = false;
+              for (var doc in snapshot.docs) {
+                final data = doc.data();
+                if (data['day'] == dayStr) {
+                  int start = timeToMinutes(data['startTime'] ?? "00:00");
+                  int end = timeToMinutes(data['endTime'] ?? "00:00");
+
+                  if (currentMins >= start && currentMins < end) {
+                    if (data['role'] == 'Teacher' && data['userId'] == uid) continue;
+
+                    isClassRunning = true;
+                    break;
+                  }
+                }
+              }
+
+              bool isLockedLocal = prefs.getBool('isAppLockActive') ?? false;
+
+              if (isClassRunning || isLockedLocal) {
+                Fluttertoast.showToast(msg: "Cannot logout while a session is actively running.", backgroundColor: Colors.red);
+                return;
+              }
+
+              await prefs.clear();
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const AuthScreen()),
+                        (route) => false
+                );
+              }
+            },
             contentPadding: EdgeInsets.zero,
-            leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.logout, color: Colors.redAccent)),
+            leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.logout, color: Colors.redAccent)),
             title: const Text('Logout', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -1517,15 +1946,15 @@ class SettingsScreen extends StatelessWidget {
   Widget _buildSettingItem(IconData icon, String title, String sub, {VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap, contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: Colors.black87)),
+      leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: Colors.black87)),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), subtitle: Text(sub, style: const TextStyle(fontSize: 12, color: Colors.black54)), trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.black26),
     );
   }
 }
 
-// ==========================================
+// =======================
 // 5.1 EDIT PROFILE SCREEN
-// ==========================================
+// =======================
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
 
@@ -1537,6 +1966,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final nameController = TextEditingController();
   final idController = TextEditingController();
   final emailController = TextEditingController();
+  String? base64Image;
 
   @override
   void initState() {
@@ -1547,10 +1977,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _loadProfileData() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      nameController.text = prefs.getString('profileName') ?? 'Wildan Ariel';
-      idController.text = prefs.getString('profileId') ?? '123456789';
-      emailController.text = prefs.getString('profileEmail') ?? 'student@university.edu';
+      nameController.text = prefs.getString('profileName') ?? 'Student';
+      idController.text = prefs.getString('profileId') ?? '';
+      emailController.text = prefs.getString('profileEmail') ?? '';
+      base64Image = prefs.getString('profileImage');
     });
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      if (pickedFile != null) {
+        final bytes = await File(pickedFile.path).readAsBytes();
+        setState(() {
+          base64Image = base64Encode(bytes);
+        });
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString('profileImage', base64Image!);
+      }
+    } catch (e) {
+      Fluttertoast.showToast(msg: "Failed to pick image. Make sure permission is granted.");
+    }
   }
 
   @override
@@ -1572,30 +2020,50 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Center(
-                    child: Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        Container(width: 100, height: 100, decoration: BoxDecoration(color: Colors.black, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))]), child: const Icon(Icons.person, size: 50, color: Colors.white)),
-                        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: const Icon(Icons.camera_alt, size: 16, color: Colors.white))
-                      ],
+                    child: GestureDetector(
+                      onTap: _pickImage,
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Container(
+                            width: 100, height: 100,
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 4),
+                              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 5))],
+                              image: base64Image != null ? DecorationImage(image: MemoryImage(base64Decode(base64Image!)), fit: BoxFit.cover) : null,
+                            ),
+                            child: base64Image == null ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
+                          ),
+                          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: const Icon(Icons.camera_alt, size: 16, color: Colors.white))
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 40),
                   const Text('Full Name', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: nameController, decoration: _inputStyle("Enter your full name")), const SizedBox(height: 24),
-                  const Text('Student ID', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: idController, keyboardType: TextInputType.number, decoration: _inputStyle("Enter your student ID")), const SizedBox(height: 24),
+                  const Text('Student ID', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: idController, keyboardType: TextInputType.text, decoration: _inputStyle("Enter your student ID")), const SizedBox(height: 24),
                   const Text('Email Address', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: emailController, keyboardType: TextInputType.emailAddress, decoration: _inputStyle("Enter your email address")), const SizedBox(height: 48),
                   SizedBox(
                     width: double.infinity, height: 56,
                     child: ElevatedButton(
                       onPressed: () async {
                         SharedPreferences prefs = await SharedPreferences.getInstance();
+                        String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
                         await prefs.setString('profileName', nameController.text);
-                        await prefs.setString('profileId', idController.text);
                         await prefs.setString('profileEmail', emailController.text);
-
+                        if (base64Image != null) {
+                          await prefs.setString('profileImage', base64Image!);
+                        }
+                        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+                          'name': nameController.text,
+                          'email': emailController.text,
+                          'profileImage': base64Image,
+                        });
                         if (context.mounted) {
                           FocusScope.of(context).unfocus();
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully!')));
+                          Fluttertoast.showToast(msg: "Profile updated and synced!");
                           Navigator.pop(context);
                         }
                       },
@@ -1610,13 +2078,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   InputDecoration _inputStyle(String hint) {
-    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withOpacity(0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
+    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
   }
 }
 
-// ==========================================
+// ======================
 // 6. ADD SCHEDULE SCREEN
-// ==========================================
+// ======================
 class AddScheduleScreen extends StatefulWidget {
   final Course? courseToEdit;
   const AddScheduleScreen({super.key, this.courseToEdit});
@@ -1687,14 +2155,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
               )).toList(),
             ),
             const SizedBox(height: 24),
-            const Text('Subject Name', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: subjectController, decoration: _inputStyle("e.g., Web Programming")), const SizedBox(height: 20),
+            const Text('Course', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: subjectController, decoration: _inputStyle("e.g., Web Programming")), const SizedBox(height: 20),
             const Text('Lecturer', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: lecturerController, decoration: _inputStyle("e.g., John Doe")), const SizedBox(height: 20),
             const Text('Room', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: roomController, decoration: _inputStyle("e.g., Computer Lab")), const SizedBox(height: 24),
             Row(
               children: [
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Start Time', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: startTimeController, decoration: _inputStyle("e.g., 08:00"))])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Start Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: startTimeController, decoration: _inputStyle("e.g., 08:00"))])),
                 const SizedBox(width: 16),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('End Time', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: endTimeController, decoration: _inputStyle("e.g., 10:30"))])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('End Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: endTimeController, decoration: _inputStyle("e.g., 10:30"))])),
               ],
             ),
             const SizedBox(height: 32),
@@ -1716,7 +2184,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.0),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1.0),
               ),
               child: Column(
                 children: [
@@ -1733,7 +2201,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
                       child: Row(
                         children: [
                           const Icon(Icons.apps, color: Colors.black54),
@@ -1741,6 +2209,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                           Expanded(child: Text("${blockedPackages.length} Apps Selected", style: const TextStyle(fontWeight: FontWeight.bold))),
                           ElevatedButton(
                             onPressed: () async {
+                              FocusScope.of(context).unfocus();
                               final result = await Navigator.push(context, _createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)));
                               if (result != null) {
                                 setState(() {
@@ -1766,7 +2235,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.0),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1.0),
               ),
               child: Row(
                 children: [
@@ -1796,6 +2265,8 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                   if (collisionError != null) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(collisionError))); return; }
 
                   try {
+                    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
                     if (widget.courseToEdit != null) {
                       await FirebaseFirestore.instance.collection('schedules').doc(widget.courseToEdit!.id).update({
                         'subject': subjectController.text, 'lecturer': lecturerController.text.isNotEmpty ? lecturerController.text : '-',
@@ -1806,6 +2277,8 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                       });
                     } else {
                       await FirebaseFirestore.instance.collection('schedules').add({
+                        'userId': uid,
+                        'joinedStudents': [uid],
                         'subject': subjectController.text, 'lecturer': lecturerController.text.isNotEmpty ? lecturerController.text : '-',
                         'room': roomController.text.isNotEmpty ? roomController.text : '-', 'day': selectedDay,
                         'startTime': startTimeController.text, 'endTime': endTimeController.text,
@@ -1835,13 +2308,13 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
   }
 
   InputDecoration _inputStyle(String hint) {
-    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withOpacity(0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
+    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
   }
 }
 
-// ==========================================
-// 6.1 CREATE ROOM SCREEN
-// ==========================================
+// ===========================
+// 6.1 CREATE CLASSROOM SCREEN
+// ===========================
 class CreateRoomScreen extends StatefulWidget {
   const CreateRoomScreen({super.key});
 
@@ -1851,6 +2324,7 @@ class CreateRoomScreen extends StatefulWidget {
 
 class _CreateRoomScreenState extends State<CreateRoomScreen> {
   final subjectController = TextEditingController();
+  final lecturerController = TextEditingController();
   final roomController = TextEditingController();
   final pinController = TextEditingController();
   final startTimeController = TextEditingController();
@@ -1867,6 +2341,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   @override
   void dispose() {
     subjectController.dispose();
+    lecturerController.dispose();
     roomController.dispose();
     pinController.dispose();
     startTimeController.dispose();
@@ -1879,13 +2354,13 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Create Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
+      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Create Classroom', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(12)), child: const Row(children: [Icon(Icons.info_outline, color: Colors.black87, size: 20), SizedBox(width: 12), Expanded(child: Text("You are creating a room as a Teacher. A room code will be generated for students.", style: TextStyle(color: Colors.black87, fontSize: 12)))] )), const SizedBox(height: 24),
+            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)), child: const Row(children: [Icon(Icons.info_outline, color: Colors.black87, size: 20), SizedBox(width: 12), Expanded(child: Text("You are creating a classroom as a Teacher. A code will be generated for students.", style: TextStyle(color: Colors.black87, fontSize: 12)))] )), const SizedBox(height: 24),
             const Text('Day', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1895,13 +2370,14 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               )).toList(),
             ),
             const SizedBox(height: 24),
-            const Text('Room/Course Name', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: subjectController, decoration: _inputStyle("e.g., Web Programming")), const SizedBox(height: 20),
-            const Text('Location', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: roomController, decoration: _inputStyle("e.g., Computer Lab")), const SizedBox(height: 24),
+            const Text('Course', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: subjectController, decoration: _inputStyle("e.g., Web Programming")), const SizedBox(height: 20),
+            const Text('Lecturer', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: lecturerController, decoration: _inputStyle("e.g., Mr. John Doe")), const SizedBox(height: 20),
+            const Text('Room', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: roomController, decoration: _inputStyle("e.g., Computer Lab 1")), const SizedBox(height: 24),
             Row(
               children: [
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Start Time', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: startTimeController, decoration: _inputStyle("e.g., 08:00"))])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Start Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: startTimeController, decoration: _inputStyle("e.g., 08:00"))])),
                 const SizedBox(width: 16),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('End Time', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: endTimeController, decoration: _inputStyle("e.g., 10:30"))])),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('End Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8), TextField(controller: endTimeController, decoration: _inputStyle("e.g., 10:30"))])),
               ],
             ),
             const SizedBox(height: 32),
@@ -1914,14 +2390,14 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.0),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1.0),
               ),
               child: Column(
                 children: [
                   Row(
                     children: [
                       Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.block, color: Colors.black87)), const SizedBox(width: 16),
-                      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Enforce App Lock', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), Text('Lock students apps during this room session', style: TextStyle(fontSize: 12, color: Colors.black54))])),
+                      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Enforce App Lock', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), Text('Lock students apps during this session', style: TextStyle(fontSize: 12, color: Colors.black54))])),
                       Switch(value: isAppLockEnabled, activeColor: Colors.white, activeTrackColor: Colors.black, onChanged: (val) => setState(() => isAppLockEnabled = val)),
                     ],
                   ),
@@ -1931,7 +2407,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
                       child: Row(
                         children: [
                           const Icon(Icons.apps, color: Colors.black54),
@@ -1939,6 +2415,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                           Expanded(child: Text("${blockedPackages.length} Apps Selected", style: const TextStyle(fontWeight: FontWeight.bold))),
                           ElevatedButton(
                             onPressed: () async {
+                              FocusScope.of(context).unfocus();
                               final result = await Navigator.push(context, _createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)));
                               if (result != null) {
                                 setState(() {
@@ -1963,7 +2440,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.1), width: 1.0),
+                border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1.0),
               ),
               child: Row(
                 children: [
@@ -1984,15 +2461,28 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
 
                   String? collisionError = await checkAndHandleCollision(selectedDay, startTimeController.text, endTimeController.text, 'Teacher');
                   if (collisionError != null) {
-                    if (collisionError == "OVERRIDDEN") Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
-                    else { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(collisionError))); return; }
+                    if (collisionError == "OVERRIDDEN") {
+                      Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
+                    } else {
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(collisionError)));
+                      return;
+                    }
                   }
 
+                  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
                   String generatedCode = 'CG-${Random().nextInt(9000) + 1000}';
 
                   try {
                     await FirebaseFirestore.instance.collection('schedules').add({
-                      'subject': subjectController.text, 'lecturer': 'Me (Teacher)', 'room': roomController.text.isNotEmpty ? roomController.text : '-',
+                      'userId': uid,
+                      'joinedStudents': [uid],
+                      'studentNames': {},
+                      'studentIds': {},
+                      'vipAccess': {},
+                      'history': [],
+                      'subject': subjectController.text,
+                      'lecturer': lecturerController.text.isNotEmpty ? lecturerController.text : 'Teacher',
+                      'room': roomController.text.isNotEmpty ? roomController.text : '-',
                       'day': selectedDay, 'startTime': startTimeController.text, 'endTime': endTimeController.text,
                       'isAppLockEnabled': isAppLockEnabled, 'isSilentModeEnabled': isSilentModeEnabled,
                       'isActive': true, 'role': 'Teacher', 'roomCode': generatedCode,
@@ -2006,7 +2496,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                           builder: (BuildContext context) {
                             return AlertDialog(
                               backgroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              title: const Text('Room Created!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
+                              title: const Text('Classroom Created!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
                               content: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2024,7 +2514,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                   }
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                child: const Text('Create Room & Generate Code', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                child: const Text('Create Classroom', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
               ),
             ),
           ],
@@ -2034,13 +2524,13 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   }
 
   InputDecoration _inputStyle(String hint) {
-    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withOpacity(0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
+    return InputDecoration(hintText: hint, hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.3)), filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5)));
   }
 }
 
-// ==========================================
+// =====================
 // 6.2 JOIN ROOM SCREEN
-// ==========================================
+// =====================
 class JoinRoomScreen extends StatefulWidget {
   final String userName;
   const JoinRoomScreen({super.key, required this.userName});
@@ -2063,52 +2553,71 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Join Room', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
+      appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0, title: const Text('Join Classroom', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Enter Room Code', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 8),
-            const Text('Ask your teacher for the room code, then enter it here to join the session.', style: TextStyle(color: Colors.black54)), const SizedBox(height: 32),
+            const Text('Enter Classroom Code', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+            const Text('Ask your teacher for the code, then enter it here to join the session.', style: TextStyle(color: Colors.black54)), const SizedBox(height: 32),
             TextField(
               controller: codeController, textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(hintText: "e.g. CG-8921", filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withOpacity(0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5))),
+              decoration: InputDecoration(hintText: "e.g. CG-8921", filled: true, fillColor: Colors.white, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.black, width: 1.5))),
             ),
             const Spacer(),
             SizedBox(
               width: double.infinity, height: 56,
               child: ElevatedButton(
                 onPressed: isLoading ? null : () async {
-                  if(codeController.text.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid room code.'))); return; }
+                  if(codeController.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid code.')));
+                    return;
+                  }
                   setState(() => isLoading = true);
 
                   try {
                     final querySnapshot = await FirebaseFirestore.instance.collection('schedules').where('roomCode', isEqualTo: codeController.text.trim()).where('role', isEqualTo: 'Teacher').get();
-                    if (querySnapshot.docs.isEmpty) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room not found. Please check the code and try again.'))); setState(() => isLoading = false); return; }
+                    if (querySnapshot.docs.isEmpty) {
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Classroom not found. Please check the code and try again.')));
+                      setState(() => isLoading = false);
+                      return;
+                    }
 
-                    final roomData = querySnapshot.docs.first.data();
+                    final roomDoc = querySnapshot.docs.first;
+                    final roomData = roomDoc.data();
                     String roomDay = roomData['day'] ?? 'Mon';
                     String roomStart = roomData['startTime'] ?? '00:00';
                     String roomEnd = roomData['endTime'] ?? '00:00';
 
                     String? collisionError = await checkAndHandleCollision(roomDay, roomStart, roomEnd, 'Student');
                     if (collisionError != null) {
-                      if (collisionError == "OVERRIDDEN") Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
-                      else { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(collisionError))); setState(() => isLoading = false); return; }
+                      if (collisionError == "OVERRIDDEN") {
+                        Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
+                      } else {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(collisionError)));
+                        setState(() => isLoading = false);
+                        return;
+                      }
                     }
 
-                    await FirebaseFirestore.instance.collection('schedules').add({
-                      'subject': roomData['subject'] ?? 'Unknown Subject', 'lecturer': roomData['lecturer'] ?? 'Unknown',
-                      'room': roomData['room'] ?? '-', 'day': roomDay, 'startTime': roomStart, 'endTime': roomEnd,
-                      'isAppLockEnabled': roomData['isAppLockEnabled'] ?? true, 'isSilentModeEnabled': roomData['isSilentModeEnabled'] ?? true,
-                      'isActive': true, 'role': 'Student', 'roomCode': roomData['roomCode'],
-                      'securityPIN': roomData['securityPIN'], 'allowanceTime': roomData['allowanceTime'] ?? 0,
-                      'blockedApps': roomData['blockedApps'] ?? [], 'studentName': widget.userName,
-                      'createdAt': FieldValue.serverTimestamp(),
+                    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                    String joinTime = "${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+
+                    SharedPreferences prefs = await SharedPreferences.getInstance();
+                    String studentId = prefs.getString('profileId') ?? "No ID";
+
+                    await FirebaseFirestore.instance.collection('schedules').doc(roomDoc.id).update({
+                      'joinedStudents': FieldValue.arrayUnion([uid]),
+                      'studentNames.$uid': widget.userName,
+                      'studentIds.$uid': studentId,
+                      'joinTimes.$uid': joinTime,
                     });
 
-                    if (context.mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Successfully joined the room!'))); Navigator.pop(context); }
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Successfully joined the classroom!')));
+                      Navigator.pop(context);
+                    }
                   } catch (e) {
                     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connection error: $e')));
                   } finally {
@@ -2116,7 +2625,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                   }
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-                child: isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Join Room', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                child: isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Join Classroom', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
               ),
             ),
           ],
@@ -2126,9 +2635,9 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
   }
 }
 
-// ==========================================
+// ======================
 // 7. SELECT APPS SCREEN
-// ==========================================
+// ======================
 class SelectAppsScreen extends StatefulWidget {
   final List<String> initialSelectedApps;
   const SelectAppsScreen({super.key, required this.initialSelectedApps});
@@ -2172,7 +2681,6 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
         _isLoadingMaster = false;
       });
     } catch (e) {
-      debugPrint("Failed to fetch master list from Firebase: $e");
       setState(() => _isLoadingMaster = false);
     }
   }
@@ -2185,7 +2693,6 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
         _isLoadingInstalled = false;
       });
     } catch (e) {
-      debugPrint("Failed to fetch local apps: $e");
       setState(() => _isLoadingInstalled = false);
     }
   }
@@ -2245,7 +2752,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                     icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black),
                     label: const Text("View All Apps", style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
                     style: TextButton.styleFrom(
-                      side: BorderSide(color: Colors.black.withOpacity(0.2), width: 1),
+                      side: BorderSide(color: Colors.black.withValues(alpha: 0.2), width: 1),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     ),
@@ -2305,7 +2812,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black.withOpacity(0.1), width: 1),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.1), width: 1),
         ),
         child: Row(
           children: [
@@ -2321,7 +2828,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                 children: [
                   const Text("Master List Apps", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
                   const SizedBox(height: 2),
-                  Text("Contains ${_masterApps.length} popular distracting apps", style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  Text("Contains popular distracting apps", style: TextStyle(fontSize: 12, color: Colors.black54)),
                 ],
               ),
             ),
@@ -2335,7 +2842,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
   void _openMasterFolderDialog() {
     showDialog(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.3),
+      barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setStateDialog) {
@@ -2417,9 +2924,9 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
   }
 }
 
-// ==========================================
-// 8. SPLASH SCREEN (STATIC LOGO)
-// ==========================================
+// ==================
+// 8. SPLASH SCREEN
+// ==================
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -2439,8 +2946,14 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _navigateToNextScreen() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool isSetupDone = prefs.getBool('isFirstTimeSetupDone') ?? false;
-    bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    String userName = prefs.getString('profileName') ?? 'Student';
+
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    bool isLoggedIn = currentUser != null;
+
+    String userName = prefs.getString('profileName') ?? "Student";
+    if (isLoggedIn && currentUser.displayName != null && currentUser.displayName!.isNotEmpty) {
+      userName = currentUser.displayName!;
+    }
 
     if (mounted) {
       if (!isSetupDone) {
@@ -2457,11 +2970,29 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Center(
-        child: Image.asset(
-          'assets/images/logo.png',
-          width: 250,
-          height: 250,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Center(
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 180,
+                fit: BoxFit.contain,
+              ),
+            ),
+
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 40.0),
+                child: Image.asset(
+                  'assets/images/r1enc.png',
+                  height: 30,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

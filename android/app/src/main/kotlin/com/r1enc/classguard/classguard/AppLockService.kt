@@ -14,20 +14,15 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.widget.Toast
 
 class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
 
-    //-------------------
-    // VARIABLES & SETUP
-    //-------------------
     private lateinit var prefs: SharedPreferences
     private var currentForegroundPackage: String = ""
     private val handler = Handler(Looper.getMainLooper())
     private var isChecking = false
 
-    //-------------------
-    // MONITORING RUNNABLE
-    //-------------------
     private val checkRunnable = object : Runnable {
         override fun run() {
             val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
@@ -46,9 +41,6 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
     }
 
-    //-------------------
-    // SERVICE LIFECYCLE
-    //-------------------
     override fun onServiceConnected() {
         super.onServiceConnected()
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -79,9 +71,6 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
     }
 
-    //-------------------
-    // ACCESSIBILITY EVENTS
-    //-------------------
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
@@ -92,9 +81,6 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         checkAutoKick()
     }
 
-    //-------------------
-    // AUTO KICK LOGIC
-    //-------------------
     private fun checkAutoKick() {
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
         if (!isAppLockActive || currentForegroundPackage.isEmpty()) return
@@ -119,14 +105,16 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
 
             val allowedApp = prefs.getString("flutter.allowedApp", "") ?: ""
             val allowedUntil = prefs.getLong("flutter.allowedUntil", 0L)
-            if (currentForegroundPackage == allowedApp && System.currentTimeMillis() < allowedUntil) {
-                return
+
+            if (System.currentTimeMillis() < allowedUntil) {
+                if (allowedApp.isEmpty() || allowedApp == "all" || currentForegroundPackage.contains(allowedApp)) {
+                    return
+                }
             }
+
             if (allowedUntil != 0L && System.currentTimeMillis() >= allowedUntil) {
                 prefs.edit().putLong("flutter.allowedUntil", 0L).apply()
             }
-
-            Log.d("ClassGuardService", "Blocked app detected. Launching Lock Screen.")
 
             val intent = Intent(this, LockActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -136,9 +124,6 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
     }
 
-    //-------------------
-    // PERMISSION CHECKS
-    //-------------------
     private fun checkOtherPermissions(): Boolean {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val hasDnd = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) notificationManager.isNotificationPolicyAccessGranted else true
@@ -159,19 +144,35 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         return hasDnd && hasUsage && hasOverlay && hasBattery
     }
 
-    //-------------------
-    // EMERGENCY POPUP
-    //-------------------
     private fun triggerEmergencyPopup() {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(
+                applicationContext,
+                "WARNING: CLASSGUARD PERMISSION DISABLED! SECURITY COMPROMISED!",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
         val popupIntent = Intent(this, SilentPopupActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        startActivity(popupIntent)
+        try {
+            startActivity(popupIntent)
+        } catch (e: Exception) {
+            Log.e("ClassGuard", "Failed to start activity: ${e.message}")
+        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
         if (isAppLockActive) {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(
+                    applicationContext,
+                    "WARNING: CLASSGUARD ACCESSIBILITY REVOKED!",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             triggerEmergencyPopup()
         }
         return super.onUnbind(intent)

@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
+import android.widget.Toast
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,9 +28,6 @@ class MainActivity: FlutterActivity() {
     private val APPLOCK_CHANNEL = "com.classguard/applock"
     private val APPINFO_CHANNEL = "com.classguard/app_info"
 
-    //-------------------
-    // FLUTTER ENGINE & METHOD CHANNELS
-    //-------------------
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -110,85 +108,46 @@ class MainActivity: FlutterActivity() {
                     result.success(true)
                 }
                 "requestAutoStartPermission" -> {
+                    val intent = Intent()
+                    val manufacturer = android.os.Build.MANUFACTURER.lowercase()
                     try {
-                        val intents = arrayOf(
-                            Intent().setComponent(android.content.ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity")),
-                            Intent().setComponent(android.content.ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")),
-                            Intent().setComponent(android.content.ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
-                            Intent().setComponent(android.content.ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")),
-                            Intent(Settings.ACTION_SETTINGS)
-                        )
-                        var success = false
-                        for (intentToOpen in intents) {
-                            try {
-                                intentToOpen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                startActivity(intentToOpen)
-                                success = true
-                                break
-                            } catch (e: Exception) {
-                                continue
+                        when {
+                            manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco") -> intent.component = android.content.ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")
+                            manufacturer.contains("oppo") || manufacturer.contains("realme") -> intent.component = android.content.ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")
+                            manufacturer.contains("vivo") || manufacturer.contains("iqoo") -> intent.component = android.content.ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")
+                            manufacturer.contains("samsung") -> intent.component = android.content.ComponentName("com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity")
+                            manufacturer.contains("huawei") || manufacturer.contains("honor") -> intent.component = android.content.ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")
+                            manufacturer.contains("asus") -> intent.component = android.content.ComponentName("com.asus.mobilemanager", "com.asus.mobilemanager.entry.FunctionActivity")
+                            manufacturer.contains("infinix") || manufacturer.contains("tecno") || manufacturer.contains("itel") -> intent.component = android.content.ComponentName("com.transsion.phonemanager", "com.itel.autobootmanager.activity.AutoBootMgrActivity")
+                            else -> {
+                                intent.action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                intent.data = android.net.Uri.parse("package:$packageName")
                             }
                         }
-                        result.success(success)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
                     } catch (e: Exception) {
+                        val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        fallbackIntent.data = android.net.Uri.parse("package:$packageName")
+                        fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(fallbackIntent)
                         result.success(false)
                     }
-                }
-                "updateLockSettings" -> {
-                    val isLocked = call.argument<Boolean>("isLocked") ?: false
-                    val blockedAppsList = call.argument<List<String>>("blockedApps") ?: listOf()
-
-                    val prefs = applicationContext.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    prefs.edit().apply {
-                        putBoolean("flutter.isAppLockActive", isLocked)
-                        putString("flutter.blockedApps", blockedAppsList.joinToString(","))
-                        apply()
-                    }
-                    result.success(true)
-                }
-                "setNativePopupAlarm" -> {
-                    val alarmId = call.argument<Int>("alarmId") ?: 0
-                    val timeInMillis = call.argument<Long>("timeInMillis") ?: 0L
-                    if (timeInMillis == 0L) {
-                        result.success(false)
-                        return@setMethodCallHandler
-                    }
-                    val title = call.argument<String>("title") ?: "Alert"
-                    val message = call.argument<String>("message") ?: "Message"
-
-                    val intent = Intent(this@MainActivity, PopupAlarmReceiver::class.java).apply {
-                        putExtra("title", title)
-                        putExtra("message", message)
-                    }
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        this@MainActivity, alarmId, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-
-                    val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
-                    } else {
-                        alarmManager.setExact(android.app.AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
-                    }
-                    result.success(true)
-                }
-                "cancelNativePopupAlarm" -> {
-                    val alarmId = call.argument<Int>("alarmId") ?: 0
-                    val intent = Intent(this@MainActivity, PopupAlarmReceiver::class.java)
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        this@MainActivity, alarmId, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-                    alarmManager.cancel(pendingIntent)
-                    result.success(true)
                 }
                 "triggerEmergencyPopup" -> {
+                    Toast.makeText(
+                        applicationContext,
+                        "WARNING: CLASSGUARD SECURITY PERMISSIONS DISABLED!",
+                        Toast.LENGTH_LONG
+                    ).show()
+
                     val popupIntent = Intent(this@MainActivity, SilentPopupActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     }
-                    startActivity(popupIntent)
+                    try {
+                        startActivity(popupIntent)
+                    } catch (e: Exception) {}
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -207,9 +166,6 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    //-------------------
-    // PERMISSION CHECKS
-    //-------------------
     private fun hasUsageStatsPermission(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -232,9 +188,6 @@ class MainActivity: FlutterActivity() {
         return false
     }
 
-    //-------------------
-    // FETCH INSTALLED APPS
-    //-------------------
     private fun getInstalledApps(): List<Map<String, String>> {
         val appList = mutableListOf<Map<String, Any>>()
         val pm = packageManager
@@ -266,17 +219,10 @@ class MainActivity: FlutterActivity() {
             .map { it.activityInfo.packageName }
 
         val systemBlacklist = listOf(
-            "com.android.settings",
-            "com.android.deskclock",
-            "com.google.android.deskclock",
-            "com.sec.android.app.clockpackage",
-            "com.coloros.alarmclock",
-            "com.vivo.alarmclock",
-            "com.miui.calculator",
-            "com.android.contacts",
-            "com.google.android.dialer",
-            "com.android.incallui",
-            "com.android.providers.downloads.ui"
+            "com.android.settings", "com.android.deskclock", "com.google.android.deskclock",
+            "com.sec.android.app.clockpackage", "com.coloros.alarmclock", "com.vivo.alarmclock",
+            "com.miui.calculator", "com.android.contacts", "com.google.android.dialer",
+            "com.android.incallui", "com.android.providers.downloads.ui"
         )
 
         for (app in packages) {
@@ -310,9 +256,6 @@ class MainActivity: FlutterActivity() {
             }
     }
 
-    //-------------------
-    // ICON CONVERSION
-    //-------------------
     private fun getIconAsBase64(app: ApplicationInfo): String {
         return try {
             val icon = app.loadIcon(packageManager)
