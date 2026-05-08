@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
 
@@ -9,6 +8,7 @@ import 'package:auto_start_flutter/auto_start_flutter.dart';
 import 'package:classguard/background/alarm_service.dart';
 import 'package:classguard/models/course.dart';
 import 'package:classguard/routes/app_routes.dart';
+import 'package:classguard/services/auth_service.dart';
 import 'package:classguard/utils/time_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,7 +18,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
@@ -470,6 +469,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   bool isLogin = true;
   bool isLoading = false;
+  final AuthService _authService = AuthService();
 
   final nameController = TextEditingController();
   final emailController = TextEditingController();
@@ -501,69 +501,21 @@ class _AuthScreenState extends State<AuthScreen> {
 
     setState(() => isLoading = true);
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String finalName = "Student";
-      String finalEmail = emailController.text.trim();
-      String finalId = "";
-
-      if (isLogin) {
-        UserCredential user = await FirebaseAuth.instance
-            .signInWithEmailAndPassword(
-              email: emailController.text.trim(),
-              password: passwordController.text.trim(),
+      final result = isLogin
+          ? await _authService.login(
+              email: emailController.text,
+              password: passwordController.text,
+            )
+          : await _authService.signup(
+              name: nameController.text,
+              email: emailController.text,
+              password: passwordController.text,
             );
-
-        DocumentSnapshot doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.user!.uid)
-            .get();
-        if (doc.exists) {
-          final data = doc.data() as Map<String, dynamic>;
-          finalName = data['name'] ?? user.user?.displayName ?? "Student";
-          finalEmail = data['email'] ?? finalEmail;
-          finalId =
-              data['studentId'] ??
-              (Random().nextInt(900000000) + 100000000).toString();
-          String? cloudImage = data['profileImage'];
-          if (cloudImage != null) {
-            await prefs.setString('profileImage', cloudImage);
-          }
-        } else {
-          finalName = user.user?.displayName ?? "Student";
-          finalId = (Random().nextInt(900000000) + 100000000).toString();
-        }
-      } else {
-        UserCredential user = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-              email: emailController.text.trim(),
-              password: passwordController.text.trim(),
-            );
-        finalName = nameController.text.trim();
-        finalId = (Random().nextInt(900000000) + 100000000).toString();
-
-        await user.user?.updateDisplayName(finalName);
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.user!.uid)
-            .set({
-              'name': finalName,
-              'email': finalEmail,
-              'studentId': finalId,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-      }
-
-      await prefs.setString('profileName', finalName);
-      await prefs.setString('profileEmail', finalEmail);
-      await prefs.setString('profileId', finalId);
-      await prefs.setString('userUid', FirebaseAuth.instance.currentUser!.uid);
-      await prefs.setBool('isLoggedIn', true);
 
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          createRoute(HomeScreen(userName: finalName)),
+          createRoute(HomeScreen(userName: result.name)),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -725,6 +677,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late Stream<QuerySnapshot> _schedulesStream;
   String? _expandedCourseId;
   String _displayName = "";
+  final AuthService _authService = AuthService();
   final platform = const MethodChannel('com.classguard/applock');
 
   Timer? _minuteTimer;
@@ -857,9 +810,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadProfileName() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final profileName = await _authService.loadProfileName(
+      fallbackName: widget.userName,
+    );
     setState(() {
-      _displayName = prefs.getString('profileName') ?? widget.userName;
+      _displayName = profileName;
     });
   }
 
@@ -3030,47 +2985,10 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 8),
           ListTile(
             onTap: () async {
-              SharedPreferences prefs = await SharedPreferences.getInstance();
-              String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+              final authService = AuthService();
+              final canLogout = await authService.canLogout();
 
-              final now = DateTime.now();
-              final dayStr = [
-                "Mon",
-                "Tue",
-                "Wed",
-                "Thu",
-                "Fri",
-                "Sat",
-                "Sun",
-              ][now.weekday - 1];
-              int currentMins = now.hour * 60 + now.minute;
-
-              final snapshot = await FirebaseFirestore.instance
-                  .collection('schedules')
-                  .where('joinedStudents', arrayContains: uid)
-                  .where('isActive', isEqualTo: true)
-                  .get();
-
-              bool isClassRunning = false;
-              for (var doc in snapshot.docs) {
-                final data = doc.data();
-                if (data['day'] == dayStr) {
-                  int start = timeToMinutes(data['startTime'] ?? "00:00");
-                  int end = timeToMinutes(data['endTime'] ?? "00:00");
-
-                  if (currentMins >= start && currentMins < end) {
-                    if (data['role'] == 'Teacher' && data['userId'] == uid)
-                      continue;
-
-                    isClassRunning = true;
-                    break;
-                  }
-                }
-              }
-
-              bool isLockedLocal = prefs.getBool('isAppLockActive') ?? false;
-
-              if (isClassRunning || isLockedLocal) {
+              if (!canLogout) {
                 Fluttertoast.showToast(
                   msg: "Cannot logout while a session is actively running.",
                   backgroundColor: Colors.red,
@@ -3078,8 +2996,7 @@ class SettingsScreen extends StatelessWidget {
                 return;
               }
 
-              await prefs.clear();
-              await FirebaseAuth.instance.signOut();
+              await authService.logout();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthScreen()),
@@ -3157,6 +3074,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final nameController = TextEditingController();
   final idController = TextEditingController();
   final emailController = TextEditingController();
+  final AuthService _authService = AuthService();
   String? base64Image;
 
   @override
@@ -3166,26 +3084,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _loadProfileData() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final profile = await _authService.loadProfileData();
     setState(() {
-      nameController.text = prefs.getString('profileName') ?? 'Student';
-      idController.text = prefs.getString('profileId') ?? '';
-      emailController.text = prefs.getString('profileEmail') ?? '';
-      base64Image = prefs.getString('profileImage');
+      nameController.text = profile.name;
+      idController.text = profile.studentId;
+      emailController.text = profile.email;
+      base64Image = profile.profileImage;
     });
   }
 
   Future<void> _pickImage() async {
     try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-      if (pickedFile != null) {
-        final bytes = await File(pickedFile.path).readAsBytes();
+      final pickedImage = await _authService.pickAndSaveProfileImage();
+      if (pickedImage != null) {
         setState(() {
-          base64Image = base64Encode(bytes);
+          base64Image = pickedImage;
         });
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('profileImage', base64Image!);
       }
     } catch (e) {
       Fluttertoast.showToast(
@@ -3311,22 +3225,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               height: 56,
               child: ElevatedButton(
                 onPressed: () async {
-                  SharedPreferences prefs =
-                      await SharedPreferences.getInstance();
-                  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-                  await prefs.setString('profileName', nameController.text);
-                  await prefs.setString('profileEmail', emailController.text);
-                  if (base64Image != null) {
-                    await prefs.setString('profileImage', base64Image!);
-                  }
-                  await FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(uid)
-                      .update({
-                        'name': nameController.text,
-                        'email': emailController.text,
-                        'profileImage': base64Image,
-                      });
+                  await _authService.saveProfile(
+                    name: nameController.text,
+                    email: emailController.text,
+                    profileImage: base64Image,
+                  );
                   if (context.mounted) {
                     FocusScope.of(context).unfocus();
                     Fluttertoast.showToast(msg: "Profile updated and synced!");
@@ -5154,6 +5057,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  final AuthService _authService = AuthService();
+
   @override
   void initState() {
     super.initState();
@@ -5163,29 +5068,18 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _navigateToNextScreen() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    bool isSetupDone = prefs.getBool('isFirstTimeSetupDone') ?? false;
-
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    bool isLoggedIn = currentUser != null;
-
-    String userName = prefs.getString('profileName') ?? "Student";
-    if (isLoggedIn &&
-        currentUser.displayName != null &&
-        currentUser.displayName!.isNotEmpty) {
-      userName = currentUser.displayName!;
-    }
+    final splashState = await _authService.loadSplashUserState();
 
     if (mounted) {
-      if (!isSetupDone) {
+      if (!splashState.isSetupDone) {
         Navigator.pushReplacement(
           context,
           createRoute(const PermissionOnboardingScreen()),
         );
-      } else if (isLoggedIn) {
+      } else if (splashState.isLoggedIn) {
         Navigator.pushReplacement(
           context,
-          createRoute(HomeScreen(userName: userName)),
+          createRoute(HomeScreen(userName: splashState.userName)),
         );
       } else {
         Navigator.pushReplacement(context, createRoute(const AuthScreen()));
