@@ -6,6 +6,7 @@ import 'dart:ui';
 
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:auto_start_flutter/auto_start_flutter.dart';
+import 'package:classguard/background/alarm_service.dart';
 import 'package:classguard/models/course.dart';
 import 'package:classguard/routes/app_routes.dart';
 import 'package:classguard/utils/time_utils.dart';
@@ -75,202 +76,6 @@ Future<String?> checkAndHandleCollision(
   }
   if (personalOverridden) return "OVERRIDDEN";
   return null;
-}
-
-// ==========================================
-// BACKGROUND ALARM FUNCTION (START & STOP)
-// ==========================================
-@pragma('vm:entry-point')
-void startClassGuard() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-
-  try {
-    double currentVol = await VolumeController().getVolume();
-    await prefs.setDouble('prevVolume', currentVol);
-
-    await SoundMode.setSoundMode(RingerModeStatus.silent);
-    await Future.delayed(const Duration(milliseconds: 500));
-    VolumeController().setVolume(0.0);
-
-    try {
-      const platform = MethodChannel('com.classguard/applock');
-
-      bool accStatus =
-          await platform.invokeMethod('checkAccessibilityPermission') ?? false;
-      bool usageStatus =
-          await platform.invokeMethod('checkUsagePermission') ?? false;
-      bool ovrStatus =
-          await platform.invokeMethod('checkOverlayPermission') ?? false;
-      bool batStatus =
-          await platform.invokeMethod('checkBatteryOptimization') ?? false;
-      bool dndStatus = await PermissionHandler.permissionsGranted ?? false;
-
-      if (!accStatus ||
-          !usageStatus ||
-          !ovrStatus ||
-          !batStatus ||
-          !dndStatus) {
-        await platform.invokeMethod('triggerEmergencyPopup');
-      }
-    } catch (e) {
-      debugPrint("Permission check failed: $e");
-    }
-
-    String uid =
-        FirebaseAuth.instance.currentUser?.uid ??
-        prefs.getString('userUid') ??
-        "";
-    final snapshot = await FirebaseFirestore.instance
-        .collection('schedules')
-        .where('joinedStudents', arrayContains: uid)
-        .where('isActive', isEqualTo: true)
-        .get();
-
-    final now = DateTime.now();
-    final dayStr = [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri",
-      "Sat",
-      "Sun",
-    ][now.weekday - 1];
-
-    String currentBlockedApps = "";
-    int currentAllowanceTime = 2;
-    String currentPin = "1234";
-
-    for (var doc in snapshot.docs) {
-      final data = doc.data();
-      if (data['day'] == dayStr) {
-        int start = timeToMinutes(data['startTime'] ?? "00:00");
-        int end = timeToMinutes(data['endTime'] ?? "00:00");
-        int current = now.hour * 60 + now.minute;
-
-        if (current >= start - 2 && current < end) {
-          if (data['role'] == 'Teacher' && data['userId'] == uid) {
-            continue;
-          }
-
-          List<dynamic> apps = data['blockedApps'] ?? [];
-          currentBlockedApps = apps.join(',');
-
-          currentAllowanceTime = data['allowanceTime'] ?? 2;
-          currentPin = data['securityPIN'] ?? "1234";
-
-          Map<String, dynamic> vipAccess = data['vipAccess'] ?? {};
-          var myVip = vipAccess[uid];
-          if (myVip != null) {
-            await prefs.setString('allowedApp', myVip['app']);
-            await prefs.setInt('allowedUntil', myVip['until']);
-          } else {
-            await prefs.setString('allowedApp', "");
-            await prefs.setInt('allowedUntil', 0);
-          }
-          break;
-        }
-      }
-    }
-
-    await prefs.setString('blockedApps', currentBlockedApps);
-    await prefs.setInt('allowanceTime', currentAllowanceTime);
-    await prefs.setString('securityPIN', currentPin);
-    await prefs.setBool('isAppLockActive', true);
-
-    Fluttertoast.showToast(
-      msg: "Class started: Device is Silent & Apps Locked",
-      toastLength: Toast.LENGTH_LONG,
-      backgroundColor: Colors.black,
-      textColor: Colors.white,
-    );
-
-    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
-    await flutterLocalNotificationsPlugin.initialize(
-      settings: initializationSettings,
-    );
-
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
-          'classguard_channel',
-          'ClassGuard Alerts',
-          importance: Importance.max,
-          priority: Priority.high,
-          ticker: 'ticker',
-        );
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      id: 0,
-      title: 'ClassGuard Activated',
-      body: 'Class session has started. Focus mode enabled.',
-      notificationDetails: platformChannelSpecifics,
-    );
-  } catch (e) {
-    debugPrint("Failed to start ClassGuard: $e");
-  }
-}
-
-@pragma('vm:entry-point')
-void stopClassGuard() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-
-  try {
-    double prevVol = prefs.getDouble('prevVolume') ?? 0.5;
-    await SoundMode.setSoundMode(RingerModeStatus.normal);
-    await Future.delayed(const Duration(milliseconds: 500));
-    VolumeController().setVolume(prevVol);
-
-    await prefs.setBool('isAppLockActive', false);
-
-    Fluttertoast.showToast(
-      msg: "Class ended: Device is back to normal",
-      toastLength: Toast.LENGTH_LONG,
-      backgroundColor: Colors.black,
-      textColor: Colors.white,
-    );
-
-    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
-    await flutterLocalNotificationsPlugin.initialize(
-      settings: initializationSettings,
-    );
-
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
-          'classguard_channel',
-          'ClassGuard Alerts',
-          importance: Importance.max,
-          priority: Priority.high,
-          ticker: 'ticker',
-        );
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      id: 1,
-      title: 'Class Session Ended',
-      body: 'Great job focusing! Devices unmuted.',
-      notificationDetails: platformChannelSpecifics,
-    );
-  } catch (e) {
-    debugPrint("Failed to stop ClassGuard: $e");
-  }
 }
 
 void main() async {
@@ -923,12 +728,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final platform = const MethodChannel('com.classguard/applock');
 
   Timer? _minuteTimer;
-  List<int> _activeAlarmIds = [];
+  late final AlarmService _alarmService;
   List<QueryDocumentSnapshot> _currentSchedules = [];
 
   @override
   void initState() {
     super.initState();
+    _alarmService = AlarmService(platform: platform);
     _loadProfileName();
     FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<
@@ -944,7 +750,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .snapshots();
 
     _scheduleSubscription = _schedulesStream.listen((snapshot) async {
-      _recalculateAlarms(snapshot.docs);
+      _alarmService.recalculateAlarms(snapshot.docs);
       _currentSchedules = snapshot.docs;
       _checkSchedulesState();
     });
@@ -1180,82 +986,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _scheduleSubscription?.cancel();
     _minuteTimer?.cancel();
     super.dispose();
-  }
-
-  void _recalculateAlarms(List<QueryDocumentSnapshot> docs) {
-    for (var id in _activeAlarmIds) {
-      AndroidAlarmManager.cancel(id);
-      platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': id});
-    }
-    _activeAlarmIds.clear();
-
-    for (var doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['isActive'] == true && data['isSilentModeEnabled'] == true) {
-        String startTime = data['startTime'] ?? "00:00";
-        String endTime = data['endTime'] ?? "00:00";
-
-        int startId = doc.id.hashCode;
-        int endId = doc.id.hashCode + 1;
-
-        _setAutomaticAlarm(
-          startTime,
-          startId,
-          startClassGuard,
-          "Focus Mode Active",
-          "Class session has started. Your phone is muted and distracting apps are locked.",
-        );
-        _setAutomaticAlarm(
-          endTime,
-          endId,
-          stopClassGuard,
-          "Focus Mode Ended",
-          "Great job! Class session has ended. Your phone is back to normal.",
-        );
-
-        _activeAlarmIds.addAll([startId, endId]);
-      }
-    }
-  }
-
-  void _setAutomaticAlarm(
-    String timeStr,
-    int alarmId,
-    Function callback,
-    String title,
-    String message,
-  ) async {
-    final now = DateTime.now();
-    final parts = timeStr.split(':');
-    if (parts.length != 2) return;
-    var scheduleTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      int.parse(parts[0]),
-      int.parse(parts[1]),
-    );
-    if (scheduleTime.isBefore(now))
-      scheduleTime = scheduleTime.add(const Duration(days: 1));
-
-    await AndroidAlarmManager.oneShot(
-      scheduleTime.difference(now),
-      alarmId,
-      callback,
-      exact: true,
-      wakeup: true,
-    );
-
-    try {
-      await platform.invokeMethod('setNativePopupAlarm', {
-        'alarmId': alarmId,
-        'timeInMillis': scheduleTime.millisecondsSinceEpoch,
-        'title': title,
-        'message': message,
-      });
-    } catch (e) {
-      debugPrint("Failed to set native alarm: $e");
-    }
   }
 
   String _getFormattedDate() {
