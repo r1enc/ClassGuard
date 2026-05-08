@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:ui';
 
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
@@ -9,6 +8,7 @@ import 'package:classguard/background/alarm_service.dart';
 import 'package:classguard/models/course.dart';
 import 'package:classguard/routes/app_routes.dart';
 import 'package:classguard/services/auth_service.dart';
+import 'package:classguard/services/firestore_service.dart';
 import 'package:classguard/utils/time_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -23,59 +23,6 @@ import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
-
-Future<String?> checkAndHandleCollision(
-  String newDay,
-  String newStart,
-  String newEnd,
-  String newRole, {
-  String? excludeId,
-}) async {
-  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-
-  final snapshot = await FirebaseFirestore.instance
-      .collection('schedules')
-      .where('joinedStudents', arrayContains: uid)
-      .where('day', isEqualTo: newDay)
-      .get();
-
-  int newStartMin = timeToMinutes(newStart);
-  int newEndMin = timeToMinutes(newEnd);
-
-  bool personalOverridden = false;
-
-  for (var doc in snapshot.docs) {
-    if (excludeId != null && doc.id == excludeId) continue;
-    final data = doc.data();
-    if (data['isActive'] == false) continue;
-
-    int existStart = timeToMinutes(data['startTime'] ?? '00:00');
-    int existEnd = timeToMinutes(data['endTime'] ?? '00:00');
-
-    if (newStartMin < existEnd && newEndMin > existStart) {
-      String existRole = data['role'] ?? 'Personal';
-      if (existRole == 'Teacher' && data['userId'] != uid) {
-        existRole = 'Student';
-      }
-
-      if (newRole == 'Teacher' || newRole == 'Student') {
-        if (existRole == 'Personal') {
-          await FirebaseFirestore.instance
-              .collection('schedules')
-              .doc(doc.id)
-              .update({'isActive': false});
-          personalOverridden = true;
-        } else {
-          return "Cannot proceed. Time overlaps with existing class: ${data['subject']}";
-        }
-      } else {
-        return "Cannot save. Time overlaps with existing schedule: ${data['subject']}";
-      }
-    }
-  }
-  if (personalOverridden) return "OVERRIDDEN";
-  return null;
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -678,6 +625,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _expandedCourseId;
   String _displayName = "";
   final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
   final platform = const MethodChannel('com.classguard/applock');
 
   Timer? _minuteTimer;
@@ -695,12 +643,7 @@ class _HomeScreenState extends State<HomeScreen> {
         >()
         ?.requestNotificationsPermission();
 
-    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-
-    _schedulesStream = FirebaseFirestore.instance
-        .collection('schedules')
-        .where('joinedStudents', arrayContains: uid)
-        .snapshots();
+    _schedulesStream = _firestoreService.schedulesStreamForCurrentUser();
 
     _scheduleSubscription = _schedulesStream.listen((snapshot) async {
       _alarmService.recalculateAlarms(snapshot.docs);
@@ -1049,12 +992,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         course.isSilentModeEnabled =
                             !course.isSilentModeEnabled;
                       });
-                      FirebaseFirestore.instance
-                          .collection('schedules')
-                          .doc(course.id)
-                          .update({
-                            'isSilentModeEnabled': course.isSilentModeEnabled,
-                          });
+                      _firestoreService.updateScheduleSilentMode(
+                        course.id,
+                        course.isSilentModeEnabled,
+                      );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
@@ -1088,12 +1029,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       setState(() {
                         course.isAppLockEnabled = !course.isAppLockEnabled;
                       });
-                      FirebaseFirestore.instance
-                          .collection('schedules')
-                          .doc(course.id)
-                          .update({
-                            'isAppLockEnabled': course.isAppLockEnabled,
-                          });
+                      _firestoreService.updateScheduleAppLock(
+                        course.id,
+                        course.isAppLockEnabled,
+                      );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
@@ -1139,23 +1078,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                           return;
                         }
-                        String uid =
-                            FirebaseAuth.instance.currentUser?.uid ?? "";
                         if (course.isOwner) {
-                          FirebaseFirestore.instance
-                              .collection('schedules')
-                              .doc(course.id)
-                              .delete();
+                          _firestoreService.deleteSchedule(course.id);
                         } else {
-                          FirebaseFirestore.instance
-                              .collection('schedules')
-                              .doc(course.id)
-                              .update({
-                                'joinedStudents': FieldValue.arrayRemove([uid]),
-                                'studentNames.$uid': FieldValue.delete(),
-                                'joinTimes.$uid': FieldValue.delete(),
-                                'vipAccess.$uid': FieldValue.delete(),
-                              });
+                          _firestoreService.leaveSchedule(course.id);
                         }
                       }
                     },
@@ -1241,13 +1167,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     return;
                   }
                   if (val == true) {
-                    String? error = await checkAndHandleCollision(
-                      course.day,
-                      course.startTime,
-                      course.endTime,
-                      course.role,
-                      excludeId: course.id,
-                    );
+                    String? error = await _firestoreService
+                        .checkAndHandleCollision(
+                          course.day,
+                          course.startTime,
+                          course.endTime,
+                          course.role,
+                          excludeId: course.id,
+                        );
                     if (error != null) {
                       if (error == "OVERRIDDEN") {
                         Fluttertoast.showToast(
@@ -1266,10 +1193,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() {
                     course.isActive = val;
                   });
-                  FirebaseFirestore.instance
-                      .collection('schedules')
-                      .doc(course.id)
-                      .update({'isActive': val});
+                  _firestoreService.updateScheduleActive(course.id, val);
                 },
               ),
             ],
@@ -1388,7 +1312,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 return;
               }
               if (val == true) {
-                String? error = await checkAndHandleCollision(
+                String? error = await _firestoreService.checkAndHandleCollision(
                   course.day,
                   course.startTime,
                   course.endTime,
@@ -1413,10 +1337,7 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() {
                 course.isActive = val;
               });
-              FirebaseFirestore.instance
-                  .collection('schedules')
-                  .doc(course.id)
-                  .update({'isActive': val});
+              _firestoreService.updateScheduleActive(course.id, val);
             },
           ),
           PopupMenuButton<String>(
@@ -1450,22 +1371,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                   return;
                 }
-                String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
                 if (course.isOwner) {
-                  FirebaseFirestore.instance
-                      .collection('schedules')
-                      .doc(course.id)
-                      .delete();
+                  _firestoreService.deleteSchedule(course.id);
                 } else {
-                  FirebaseFirestore.instance
-                      .collection('schedules')
-                      .doc(course.id)
-                      .update({
-                        'joinedStudents': FieldValue.arrayRemove([uid]),
-                        'studentNames.$uid': FieldValue.delete(),
-                        'joinTimes.$uid': FieldValue.delete(),
-                        'vipAccess.$uid': FieldValue.delete(),
-                      });
+                  _firestoreService.leaveSchedule(course.id);
                 }
               }
             },
@@ -2105,15 +2014,12 @@ class TeacherDashboardScreen extends StatelessWidget {
                 int unlockMillis =
                     DateTime.now().millisecondsSinceEpoch +
                     (finalMins * 60 * 1000);
-                FirebaseFirestore.instance
-                    .collection('schedules')
-                    .doc(course.id)
-                    .update({
-                      'vipAccess.$studentUid': {
-                        'app': selectedApp,
-                        'until': unlockMillis,
-                      },
-                    });
+                await FirestoreService().grantVipAccess(
+                  scheduleId: course.id,
+                  studentUid: studentUid,
+                  selectedApp: selectedApp,
+                  unlockMillis: unlockMillis,
+                );
                 if (context.mounted) {
                   Navigator.pop(context);
                   Fluttertoast.showToast(
@@ -2379,13 +2285,12 @@ class TeacherDashboardScreen extends StatelessWidget {
                                                           1 -
                                                           index,
                                                     );
-                                                    FirebaseFirestore.instance
-                                                        .collection('schedules')
-                                                        .doc(course.id)
-                                                        .update({
-                                                          'history':
+                                                    FirestoreService()
+                                                        .updateAttendanceHistory(
+                                                          scheduleId: course.id,
+                                                          updatedHistory:
                                                               updatedHistory,
-                                                        });
+                                                        );
                                                     Navigator.pop(
                                                       dialogContext,
                                                     );
@@ -2480,10 +2385,7 @@ class TeacherDashboardScreen extends StatelessWidget {
         centerTitle: true,
       ),
       body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('schedules')
-            .doc(course.id)
-            .snapshots(),
+        stream: FirestoreService().scheduleStream(course.id),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting)
             return const Center(
@@ -2783,35 +2685,13 @@ class TeacherDashboardScreen extends StatelessWidget {
                         ? () {
                             String uid =
                                 FirebaseAuth.instance.currentUser?.uid ?? "";
-                            if (studentNames.isNotEmpty) {
-                              String formattedDate = DateTime.now()
-                                  .toIso8601String();
-                              FirebaseFirestore.instance
-                                  .collection('schedules')
-                                  .doc(course.id)
-                                  .update({
-                                    'history': FieldValue.arrayUnion([
-                                      {
-                                        'date': formattedDate,
-                                        'students': studentNames,
-                                        'studentIds': studentIds,
-                                        'joinTimes': joinTimes,
-                                      },
-                                    ]),
-                                  });
-                            }
-
-                            FirebaseFirestore.instance
-                                .collection('schedules')
-                                .doc(course.id)
-                                .update({
-                                  'isActive': false,
-                                  'joinedStudents': [uid],
-                                  'studentNames': {},
-                                  'studentIds': {},
-                                  'joinTimes': {},
-                                  'vipAccess': {},
-                                });
+                            FirestoreService().endClassSession(
+                              scheduleId: course.id,
+                              uid: uid,
+                              studentNames: studentNames,
+                              studentIds: studentIds,
+                              joinTimes: joinTimes,
+                            );
 
                             Fluttertoast.showToast(
                               msg:
@@ -3301,6 +3181,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
   final startTimeController = TextEditingController();
   final endTimeController = TextEditingController();
   final pinController = TextEditingController();
+  final FirestoreService _firestoreService = FirestoreService();
 
   String selectedDay = "Mon";
   bool isAppLockEnabled = true;
@@ -3664,13 +3545,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                     return;
                   }
 
-                  String? collisionError = await checkAndHandleCollision(
-                    selectedDay,
-                    startTimeController.text,
-                    endTimeController.text,
-                    'Personal',
-                    excludeId: widget.courseToEdit?.id,
-                  );
+                  String? collisionError = await _firestoreService
+                      .checkAndHandleCollision(
+                        selectedDay,
+                        startTimeController.text,
+                        endTimeController.text,
+                        'Personal',
+                        excludeId: widget.courseToEdit?.id,
+                      );
                   if (collisionError != null) {
                     if (mounted)
                       ScaffoldMessenger.of(
@@ -3680,55 +3562,19 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                   }
 
                   try {
-                    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-
-                    if (widget.courseToEdit != null) {
-                      await FirebaseFirestore.instance
-                          .collection('schedules')
-                          .doc(widget.courseToEdit!.id)
-                          .update({
-                            'subject': subjectController.text,
-                            'lecturer': lecturerController.text.isNotEmpty
-                                ? lecturerController.text
-                                : '-',
-                            'room': roomController.text.isNotEmpty
-                                ? roomController.text
-                                : '-',
-                            'day': selectedDay,
-                            'startTime': startTimeController.text,
-                            'endTime': endTimeController.text,
-                            'isAppLockEnabled': isAppLockEnabled,
-                            'isSilentModeEnabled': isSilentModeEnabled,
-                            'blockedApps': blockedPackages,
-                            'securityPIN': pinController.text,
-                            'allowanceTime': 1,
-                          });
-                    } else {
-                      await FirebaseFirestore.instance
-                          .collection('schedules')
-                          .add({
-                            'userId': uid,
-                            'joinedStudents': [uid],
-                            'subject': subjectController.text,
-                            'lecturer': lecturerController.text.isNotEmpty
-                                ? lecturerController.text
-                                : '-',
-                            'room': roomController.text.isNotEmpty
-                                ? roomController.text
-                                : '-',
-                            'day': selectedDay,
-                            'startTime': startTimeController.text,
-                            'endTime': endTimeController.text,
-                            'isAppLockEnabled': isAppLockEnabled,
-                            'isSilentModeEnabled': isSilentModeEnabled,
-                            'isActive': true,
-                            'role': 'Personal',
-                            'blockedApps': blockedPackages,
-                            'securityPIN': pinController.text,
-                            'allowanceTime': 1,
-                            'createdAt': FieldValue.serverTimestamp(),
-                          });
-                    }
+                    await _firestoreService.savePersonalSchedule(
+                      scheduleId: widget.courseToEdit?.id,
+                      subject: subjectController.text,
+                      lecturer: lecturerController.text,
+                      room: roomController.text,
+                      day: selectedDay,
+                      startTime: startTimeController.text,
+                      endTime: endTimeController.text,
+                      isAppLockEnabled: isAppLockEnabled,
+                      isSilentModeEnabled: isSilentModeEnabled,
+                      blockedApps: blockedPackages,
+                      securityPin: pinController.text,
+                    );
 
                     if (mounted) {
                       FocusScope.of(context).unfocus();
@@ -3808,6 +3654,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   final startTimeController = TextEditingController();
   final endTimeController = TextEditingController();
   final allowanceController = TextEditingController(text: "2");
+  final FirestoreService _firestoreService = FirestoreService();
 
   String selectedDay = "Mon";
   bool isAppLockEnabled = true;
@@ -4183,12 +4030,13 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                     return;
                   }
 
-                  String? collisionError = await checkAndHandleCollision(
-                    selectedDay,
-                    startTimeController.text,
-                    endTimeController.text,
-                    'Teacher',
-                  );
+                  String? collisionError = await _firestoreService
+                      .checkAndHandleCollision(
+                        selectedDay,
+                        startTimeController.text,
+                        endTimeController.text,
+                        'Teacher',
+                      );
                   if (collisionError != null) {
                     if (collisionError == "OVERRIDDEN") {
                       Fluttertoast.showToast(
@@ -4204,40 +4052,21 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                     }
                   }
 
-                  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-                  String generatedCode = 'CG-${Random().nextInt(9000) + 1000}';
-
                   try {
-                    await FirebaseFirestore.instance
-                        .collection('schedules')
-                        .add({
-                          'userId': uid,
-                          'joinedStudents': [uid],
-                          'studentNames': {},
-                          'studentIds': {},
-                          'vipAccess': {},
-                          'history': [],
-                          'subject': subjectController.text,
-                          'lecturer': lecturerController.text.isNotEmpty
-                              ? lecturerController.text
-                              : 'Teacher',
-                          'room': roomController.text.isNotEmpty
-                              ? roomController.text
-                              : '-',
-                          'day': selectedDay,
-                          'startTime': startTimeController.text,
-                          'endTime': endTimeController.text,
-                          'isAppLockEnabled': isAppLockEnabled,
-                          'isSilentModeEnabled': isSilentModeEnabled,
-                          'isActive': true,
-                          'role': 'Teacher',
-                          'roomCode': generatedCode,
-                          'securityPIN': pinController.text,
-                          'allowanceTime':
-                              int.tryParse(allowanceController.text) ?? 0,
-                          'blockedApps': blockedPackages,
-                          'createdAt': FieldValue.serverTimestamp(),
-                        });
+                    String generatedCode = await _firestoreService
+                        .createClassroom(
+                          subject: subjectController.text,
+                          lecturer: lecturerController.text,
+                          room: roomController.text,
+                          day: selectedDay,
+                          startTime: startTimeController.text,
+                          endTime: endTimeController.text,
+                          isAppLockEnabled: isAppLockEnabled,
+                          isSilentModeEnabled: isSilentModeEnabled,
+                          securityPin: pinController.text,
+                          allowanceText: allowanceController.text,
+                          blockedApps: blockedPackages,
+                        );
 
                     if (context.mounted) {
                       showDialog(
@@ -4386,6 +4215,7 @@ class JoinRoomScreen extends StatefulWidget {
 
 class _JoinRoomScreenState extends State<JoinRoomScreen> {
   final codeController = TextEditingController();
+  final FirestoreService _firestoreService = FirestoreService();
   bool isLoading = false;
 
   @override
@@ -4471,14 +4301,8 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                         setState(() => isLoading = true);
 
                         try {
-                          final querySnapshot = await FirebaseFirestore.instance
-                              .collection('schedules')
-                              .where(
-                                'roomCode',
-                                isEqualTo: codeController.text.trim(),
-                              )
-                              .where('role', isEqualTo: 'Teacher')
-                              .get();
+                          final querySnapshot = await _firestoreService
+                              .findClassroomByCode(codeController.text);
                           if (querySnapshot.docs.isEmpty) {
                             if (context.mounted)
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -4498,8 +4322,8 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                           String roomStart = roomData['startTime'] ?? '00:00';
                           String roomEnd = roomData['endTime'] ?? '00:00';
 
-                          String? collisionError =
-                              await checkAndHandleCollision(
+                          String? collisionError = await _firestoreService
+                              .checkAndHandleCollision(
                                 roomDay,
                                 roomStart,
                                 roomEnd,
@@ -4521,25 +4345,10 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                             }
                           }
 
-                          String uid =
-                              FirebaseAuth.instance.currentUser?.uid ?? "";
-                          String joinTime =
-                              "${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}";
-
-                          SharedPreferences prefs =
-                              await SharedPreferences.getInstance();
-                          String studentId =
-                              prefs.getString('profileId') ?? "No ID";
-
-                          await FirebaseFirestore.instance
-                              .collection('schedules')
-                              .doc(roomDoc.id)
-                              .update({
-                                'joinedStudents': FieldValue.arrayUnion([uid]),
-                                'studentNames.$uid': widget.userName,
-                                'studentIds.$uid': studentId,
-                                'joinTimes.$uid': joinTime,
-                              });
+                          await _firestoreService.joinClassroom(
+                            roomId: roomDoc.id,
+                            userName: widget.userName,
+                          );
 
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -4607,6 +4416,7 @@ class SelectAppsScreen extends StatefulWidget {
 
 class _SelectAppsScreenState extends State<SelectAppsScreen> {
   static const platformAppInfo = MethodChannel('com.classguard/app_info');
+  final FirestoreService _firestoreService = FirestoreService();
 
   List<Map<String, dynamic>> _installedApps = [];
   List<Map<String, dynamic>> _masterApps = [];
@@ -4627,18 +4437,9 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
 
   Future<void> _fetchMasterApps() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('Master Apps')
-          .get();
+      final masterApps = await _firestoreService.fetchMasterApps();
       setState(() {
-        _masterApps = snapshot.docs.map((doc) {
-          final data = doc.data();
-          return {
-            "name": data['name'] ?? 'Unknown App',
-            "package": data['package'] ?? '',
-            "iconUrl": data['iconUrl'] ?? '',
-          };
-        }).toList();
+        _masterApps = masterApps;
         _isLoadingMaster = false;
       });
     } catch (e) {
