@@ -5,6 +5,15 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+import java.io.FileInputStream
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.r1enc.classguard.classguard"
     compileSdk = flutter.compileSdkVersion
@@ -22,16 +31,25 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.r1enc.classguard.classguard"
+        applicationId = "com.ti24a4.app7"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -41,6 +59,5 @@ flutter {
 }
 
 dependencies {
-    // DI KOTLIN DSL: Wajib pakai tanda kurung dan kutip dua
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
