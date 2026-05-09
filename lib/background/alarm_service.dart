@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+// Import main.dart to access wakeUpClassGuard function
+import 'package:classguard/main.dart';
+
 class AlarmService {
   AlarmService({required this.platform});
 
@@ -14,6 +17,8 @@ class AlarmService {
     for (var id in activeAlarmIds) {
       AndroidAlarmManager.cancel(id);
       platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': id});
+      // Also cancel the warmup alarm
+      AndroidAlarmManager.cancel(id + 10000);
     }
     activeAlarmIds.clear();
 
@@ -47,12 +52,12 @@ class AlarmService {
   }
 
   void setAutomaticAlarm(
-    String timeStr,
-    int alarmId,
-    Function callback,
-    String title,
-    String message,
-  ) async {
+      String timeStr,
+      int alarmId,
+      Function callback,
+      String title,
+      String message,
+      ) async {
     final now = DateTime.now();
     final parts = timeStr.split(':');
     if (parts.length != 2) return;
@@ -67,6 +72,22 @@ class AlarmService {
       scheduleTime = scheduleTime.add(const Duration(days: 1));
     }
 
+    // ======================================
+    // WARMUP ALARM LOGIC (5 MINUTES BEFORE)
+    // ======================================
+    DateTime warmupTime = scheduleTime.subtract(const Duration(minutes: 5));
+    if (warmupTime.isAfter(now)) {
+      await AndroidAlarmManager.oneShot(
+        warmupTime.difference(now),
+        alarmId + 10000, // Unique ID for warmup
+        wakeUpClassGuard,
+        exact: true,
+        wakeup: true,
+      );
+    }
+    // ===========
+    // MAIN ALARM
+    // ===========
     await AndroidAlarmManager.oneShot(
       scheduleTime.difference(now),
       alarmId,

@@ -4846,6 +4846,19 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
     );
   }
 }
+// ===================================================
+// BACKGROUND WAKE UP (KEEP THIS IN MAIN.DART)
+// ===================================================
+
+@pragma('vm:entry-point')
+void wakeUpClassGuard() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // This function is intentionally empty.
+  // Its purpose is to trigger the Android Background Isolate
+  // 5 minutes before the actual class starts to ensure
+  // the Accessibility Service is bound and ready.
+  debugPrint("ClassGuard Warmup: Background Isolate Awakened!");
+}
 
 // ==================
 // 8. SPLASH SCREEN
