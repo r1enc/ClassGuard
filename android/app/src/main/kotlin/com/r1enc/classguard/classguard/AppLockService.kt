@@ -47,7 +47,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         prefs.registerOnSharedPreferenceChangeListener(this)
         Log.d("ClassGuardService", "Accessibility Service Connected")
 
-        if (prefs.getBoolean("flutter.isAppLockActive", false)) {
+        if (prefs.getBoolean("flutter.isAppLockActive", false) || prefs.getBoolean("flutter.isWarmupActive", false)) {
             startProtectionService()
         }
 
@@ -56,17 +56,21 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
-        if (key == "flutter.isAppLockActive") {
-            val isActive = sharedPreferences?.getBoolean(key, false) ?: false
+        if (key == "flutter.isAppLockActive" || key == "flutter.isWarmupActive") {
+            val isLockActive = sharedPreferences?.getBoolean("flutter.isAppLockActive", false) ?: false
+            val isWarmupActive = sharedPreferences?.getBoolean("flutter.isWarmupActive", false) ?: false
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-            if (isActive) {
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+            if (isLockActive || isWarmupActive) {
                 startProtectionService()
             } else {
                 val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVolume / 2, 0)
                 stopProtectionService()
+            }
+
+            if (isLockActive) {
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
             }
         }
     }
@@ -159,7 +163,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         try {
             startActivity(popupIntent)
         } catch (e: Exception) {
-            Log.e("ClassGuard", "Failed to start activity: ${e.message}")
+            Log.e("ClassGuard", "Failed to start activity: " + e.message)
         }
     }
 

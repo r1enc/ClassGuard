@@ -17,131 +17,95 @@ Future<void> showClassGuardNotification({
   required String title,
   required String body,
 }) async {
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  const InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-  );
-  await flutterLocalNotificationsPlugin.initialize(
-    settings: initializationSettings,
+  final FlutterLocalNotificationsPlugin plugin = FlutterLocalNotificationsPlugin();
+
+  final AndroidInitializationSettings androidInit =
+  AndroidInitializationSettings('@mipmap/launcher_icon');
+
+  final InitializationSettings initSettings = InitializationSettings(
+    android: androidInit,
   );
 
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-        'classguard_channel',
-        'ClassGuard Alerts',
-        importance: Importance.max,
-        priority: Priority.high,
-        ticker: 'ticker',
-      );
-  const NotificationDetails platformChannelSpecifics = NotificationDetails(
-    android: androidPlatformChannelSpecifics,
+  // FIX 1: Parameternya adalah 'settings:' BUKAN 'initializationSettings:'
+  await plugin.initialize(
+    settings: initSettings,
   );
 
-  await flutterLocalNotificationsPlugin.show(
+  final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    'classguard_channel',
+    'ClassGuard Alerts',
+    importance: Importance.max,
+    priority: Priority.high,
+    showWhen: true,
+  );
+
+  final NotificationDetails platformDetails = NotificationDetails(
+    android: androidDetails,
+  );
+
+  // FIX 2: Semua parameter wajib dipanggil pakai namanya (named parameters)
+  // dan parameter terakhir namanya berubah jadi 'notificationDetails:'
+  await plugin.show(
     id: id,
     title: title,
     body: body,
-    notificationDetails: platformChannelSpecifics,
+    notificationDetails: platformDetails,
   );
 }
-
 @pragma('vm:entry-point')
 void startClassGuard() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   SharedPreferences prefs = await SharedPreferences.getInstance();
 
+  String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+  if (uid.isEmpty) return;
+
+  final now = DateTime.now();
+  final days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  String dayStr = days[now.weekday % 7];
+  int currentMins = now.hour * 60 + now.minute;
+
   try {
-    double currentVol = await VolumeController().getVolume();
-    await prefs.setDouble('prevVolume', currentVol);
-
-    await SoundMode.setSoundMode(RingerModeStatus.silent);
-    await Future.delayed(const Duration(milliseconds: 500));
-    VolumeController().setVolume(0.0);
-
-    try {
-      const platform = MethodChannel('com.classguard/applock');
-
-      bool accStatus =
-          await platform.invokeMethod('checkAccessibilityPermission') ?? false;
-      bool usageStatus =
-          await platform.invokeMethod('checkUsagePermission') ?? false;
-      bool ovrStatus =
-          await platform.invokeMethod('checkOverlayPermission') ?? false;
-      bool batStatus =
-          await platform.invokeMethod('checkBatteryOptimization') ?? false;
-      bool dndStatus = await PermissionHandler.permissionsGranted ?? false;
-
-      if (!accStatus ||
-          !usageStatus ||
-          !ovrStatus ||
-          !batStatus ||
-          !dndStatus) {
-        await platform.invokeMethod('triggerEmergencyPopup');
-      }
-    } catch (e) {
-      debugPrint("Permission check failed: $e");
-    }
-
-    String uid =
-        FirebaseAuth.instance.currentUser?.uid ??
-        prefs.getString('userUid') ??
-        "";
     final snapshot = await FirebaseFirestore.instance
         .collection('schedules')
         .where('joinedStudents', arrayContains: uid)
         .where('isActive', isEqualTo: true)
         .get();
 
-    final now = DateTime.now();
-    final dayStr = [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri",
-      "Sat",
-      "Sun",
-    ][now.weekday - 1];
-
     String currentBlockedApps = "";
-    int currentAllowanceTime = 2;
+    int currentAllowanceTime = 0;
     String currentPin = "1234";
+    bool matched = false;
 
     for (var doc in snapshot.docs) {
       final data = doc.data();
       if (data['day'] == dayStr) {
         int start = timeToMinutes(data['startTime'] ?? "00:00");
         int end = timeToMinutes(data['endTime'] ?? "00:00");
-        int current = now.hour * 60 + now.minute;
 
-        if (current >= start - 2 && current < end) {
+        if (currentMins >= start && currentMins < end) {
           if (data['role'] == 'Teacher' && data['userId'] == uid) {
             continue;
           }
-
-          List<dynamic> apps = data['blockedApps'] ?? [];
-          currentBlockedApps = apps.join(',');
-
-          currentAllowanceTime = data['allowanceTime'] ?? 2;
+          List blocked = data['blockedApps'] ?? [];
+          currentBlockedApps = blocked.join(",");
+          currentAllowanceTime = data['allowanceTime'] ?? 0;
           currentPin = data['securityPIN'] ?? "1234";
-
-          Map<String, dynamic> vipAccess = data['vipAccess'] ?? {};
-          var myVip = vipAccess[uid];
-          if (myVip != null) {
-            await prefs.setString('allowedApp', myVip['app']);
-            await prefs.setInt('allowedUntil', myVip['until']);
-          } else {
-            await prefs.setString('allowedApp', "");
-            await prefs.setInt('allowedUntil', 0);
-          }
+          matched = true;
           break;
         }
       }
     }
+
+    if (!matched) return;
+
+    try {
+      double vol = await VolumeController().getVolume();
+      await prefs.setDouble('prevVolume', vol);
+    } catch (_) {}
+
+    await SoundMode.setSoundMode(RingerModeStatus.silent);
 
     await prefs.setString('blockedApps', currentBlockedApps);
     await prefs.setInt('allowanceTime', currentAllowanceTime);
@@ -176,7 +140,9 @@ void stopClassGuard() async {
     await Future.delayed(const Duration(milliseconds: 500));
     VolumeController().setVolume(prevVol);
 
+    // Matikan status lock aktif dan warmup aktif sekaligus
     await prefs.setBool('isAppLockActive', false);
+    await prefs.setBool('isWarmupActive', false);
 
     Fluttertoast.showToast(
       msg: "Class ended: Device is back to normal",
@@ -187,8 +153,8 @@ void stopClassGuard() async {
 
     await showClassGuardNotification(
       id: 1,
-      title: 'Class Session Ended',
-      body: 'Great job focusing! Devices unmuted.',
+      title: 'ClassGuard Deactivated',
+      body: 'Class session has ended. Device unlocked.',
     );
   } catch (e) {
     debugPrint("Failed to stop ClassGuard: $e");

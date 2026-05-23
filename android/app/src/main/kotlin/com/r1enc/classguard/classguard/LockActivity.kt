@@ -116,7 +116,7 @@ class LockActivity : Activity() {
         }
 
         subtitleDisplay = TextView(this).apply {
-            text = "Temporarily unlock $appName\nDuration: $allowanceTimeMinutes Min"
+            text = "" // DIKOSONGIN BIAR AESTHETIC
             setTextColor(Color.parseColor("#555555"))
             textSize = 14f
             typeface = montserratRegular
@@ -290,7 +290,7 @@ class LockActivity : Activity() {
                 } else {
                     isCooldown = false
                     wrongAttempts = 0
-                    subtitleDisplay.text = "ClassGuard Protection Active"
+                    subtitleDisplay.text = "" // DIKOSONGIN KEMBALI SAAT COOLDOWN SELESAI
                     subtitleDisplay.setTextColor(Color.parseColor("#555555"))
                 }
             }

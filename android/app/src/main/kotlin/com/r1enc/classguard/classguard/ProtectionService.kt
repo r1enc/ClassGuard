@@ -25,12 +25,33 @@ class ProtectionService : Service() {
         override fun run() {
             if (isMonitoring) {
                 val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
+                val isWarmupActive = prefs.getBoolean("flutter.isWarmupActive", false)
 
-                if (!isAppLockActive) {
+                // 1. Satpam bunuh diri HANYA JIKA dua mode ini mati
+                if (!isAppLockActive && !isWarmupActive) {
                     stopSelf()
                     return
                 }
 
+                // 2. Update Teks Notifikasi secara dinamis!
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val launchIntent = Intent(this@ProtectionService, MainActivity::class.java)
+                val pendingIntent = PendingIntent.getActivity(this@ProtectionService, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+                val titleText = if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
+                val contentText = if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
+
+                val notification = NotificationCompat.Builder(this@ProtectionService, "classguard_protection")
+                    .setContentTitle(titleText)
+                    .setContentText(contentText)
+                    .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+                    .setOngoing(true)
+                    .setContentIntent(pendingIntent)
+                    .build()
+
+                manager.notify(101, notification) // Update teks notifikasi di layar HP
+
+                // 3. Cek Izin Aksesibilitas
                 if (!isAccessibilityServiceEnabled(this@ProtectionService, AppLockService::class.java)) {
                     val lastPopupTime = prefs.getLong("last_popup_time", 0L)
                     val currentTime = System.currentTimeMillis()
@@ -65,12 +86,16 @@ class ProtectionService : Service() {
             manager.createNotificationChannel(channel)
         }
 
+        val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
+        val titleText = if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
+        val contentText = if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
+
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val notification = NotificationCompat.Builder(this, "classguard_protection")
-            .setContentTitle("ClassGuard is Active")
-            .setContentText("Focus mode is running. App Lock is active.")
+            .setContentTitle(titleText)
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
