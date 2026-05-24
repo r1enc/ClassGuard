@@ -1,25 +1,23 @@
 import 'dart:convert';
-
 import 'package:classguard/routes/app_routes.dart';
 import 'package:classguard/screens/auth/auth_screen.dart';
 import 'package:classguard/screens/onboarding/permission_onboarding_screen.dart';
 import 'package:classguard/services/auth_service.dart';
+import 'package:classguard/theme/app_theme.dart';
+import 'package:classguard/widgets/primary_button.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
-// ===================
-// 5. SETTINGS SCREEN
-// ===================
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: AppTheme.backgroundColor,
+        foregroundColor: AppTheme.textDark,
         elevation: 0,
         title: const Text(
           'Settings',
@@ -32,28 +30,19 @@ class SettingsScreen extends StatelessWidget {
         children: [
           const Text(
             'Account',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.black54,
-            ),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textLight),
           ),
           const SizedBox(height: 12),
           _buildSettingItem(
             Icons.person_outline,
             'Edit Profile',
             'Name, Student ID, Email, Photo',
-            onTap: () =>
-                Navigator.push(context, createRoute(const EditProfileScreen())),
+            onTap: () => Navigator.push(context, createRoute(const EditProfileScreen())),
           ),
           const SizedBox(height: 32),
           const Text(
             'System',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.black54,
-            ),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textLight),
           ),
           const SizedBox(height: 12),
           _buildSettingItem(
@@ -62,9 +51,7 @@ class SettingsScreen extends StatelessWidget {
             'Accessibility, DND, Overlay',
             onTap: () => Navigator.push(
               context,
-              createRoute(
-                const PermissionOnboardingScreen(isFromSettings: true),
-              ),
+              createRoute(const PermissionOnboardingScreen(isFromSettings: true)),
             ),
           ),
           _buildSettingItem(
@@ -74,7 +61,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () {
               showModalBottomSheet(
                 context: context,
-                backgroundColor: Colors.white,
+                backgroundColor: AppTheme.backgroundColor,
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
@@ -85,17 +72,11 @@ class SettingsScreen extends StatelessWidget {
                     children: [
                       const Text(
                         'How to Use ClassGuard',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 16),
                       const ExpansionTile(
-                        title: Text(
-                          'Personal Schedule',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        title: Text('Personal Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
                         children: [
                           Padding(
                             padding: EdgeInsets.all(16.0),
@@ -107,10 +88,7 @@ class SettingsScreen extends StatelessWidget {
                         ],
                       ),
                       const ExpansionTile(
-                        title: Text(
-                          'Classroom',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        title: Text('Classroom', style: TextStyle(fontWeight: FontWeight.bold)),
                         children: [
                           Padding(
                             padding: EdgeInsets.all(16.0),
@@ -127,7 +105,6 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-
           _buildSettingItem(
             Icons.info_outline,
             'About ClassGuard',
@@ -138,12 +115,9 @@ class SettingsScreen extends StatelessWidget {
             onTap: () async {
               final authService = AuthService();
               final canLogout = await authService.canLogout();
-
+// Prevent logout while active, focus protection is running.
               if (!canLogout) {
-                Fluttertoast.showToast(
-                  msg: "Cannot logout while a session is actively running.",
-                  backgroundColor: Colors.red,
-                );
+                Fluttertoast.showToast(msg: "Cannot logout while a session is actively running.", backgroundColor: Colors.red);
                 return;
               }
 
@@ -151,7 +125,7 @@ class SettingsScreen extends StatelessWidget {
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthScreen()),
-                  (route) => false,
+                      (route) => false,
                 );
               }
             },
@@ -166,10 +140,7 @@ class SettingsScreen extends StatelessWidget {
             ),
             title: const Text(
               'Logout',
-              style: TextStyle(
-                color: Colors.redAccent,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -177,43 +148,25 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSettingItem(
-    IconData icon,
-    String title,
-    String sub, {
-    VoidCallback? onTap,
-  }) {
+  Widget _buildSettingItem(IconData icon, String title, String sub, {VoidCallback? onTap}) {
     return ListTile(
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
       leading: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.05),
+          color: AppTheme.iconBackground,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, color: Colors.black87),
+        child: Icon(icon, color: AppTheme.textDark),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-      ),
-      subtitle: Text(
-        sub,
-        style: const TextStyle(fontSize: 12, color: Colors.black54),
-      ),
-      trailing: const Icon(
-        Icons.chevron_right,
-        size: 20,
-        color: Colors.black26,
-      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      subtitle: Text(sub, style: const TextStyle(fontSize: 12, color: AppTheme.textLight)),
+      trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.black26),
     );
   }
 }
 
-// =======================
-// 5.1 EDIT PROFILE SCREEN
-// =======================
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
 
@@ -227,6 +180,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final emailController = TextEditingController();
   final AuthService _authService = AuthService();
   String? base64Image;
+  bool isLoading = false; 
 
   @override
   void initState() {
@@ -253,9 +207,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         });
       }
     } catch (e) {
-      Fluttertoast.showToast(
-        msg: "Failed to pick image. Make sure permission is granted.",
-      );
+      Fluttertoast.showToast(msg: "Failed to pick image. Make sure permission is granted.");
     }
   }
 
@@ -270,19 +222,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: AppTheme.backgroundColor,
+        foregroundColor: AppTheme.textDark,
         elevation: 0,
-        title: const Text(
-          'Edit Profile',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
+        title: const Text('Edit Profile', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppTheme.defaultPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -296,7 +245,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       width: 100,
                       height: 100,
                       decoration: BoxDecoration(
-                        color: Colors.black,
+                        color: AppTheme.primaryColor,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 4),
                         boxShadow: [
@@ -308,127 +257,76 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ],
                         image: base64Image != null
                             ? DecorationImage(
-                                image: MemoryImage(base64Decode(base64Image!)),
-                                fit: BoxFit.cover,
-                              )
+                          image: MemoryImage(base64Decode(base64Image!)),
+                          fit: BoxFit.cover,
+                        )
                             : null,
                       ),
                       child: base64Image == null
-                          ? const Icon(
-                              Icons.person,
-                              size: 50,
-                              color: Colors.white,
-                            )
+                          ? const Icon(Icons.person, size: 50, color: Colors.white)
                           : null,
                     ),
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.black,
+                        color: AppTheme.primaryColor,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 2),
                       ),
-                      child: const Icon(
-                        Icons.camera_alt,
-                        size: 16,
-                        color: Colors.white,
-                      ),
+                      child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
                     ),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 40),
-            const Text(
-              'Full Name',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+
+            const Text('Full Name', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             TextField(
               controller: nameController,
-              decoration: _inputStyle("Enter your full name"),
+              decoration: AppTheme.baseInputDecoration("Enter your full name"),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Student ID',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+
+            const Text('Student ID', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             TextField(
               controller: idController,
               keyboardType: TextInputType.text,
-              decoration: _inputStyle("Enter your student ID"),
+              decoration: AppTheme.baseInputDecoration("Enter your student ID"),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Email Address',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+
+            const Text('Email Address', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             TextField(
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
-              decoration: _inputStyle("Enter your email address"),
+              decoration: AppTheme.baseInputDecoration("Enter your email address"),
             ),
             const SizedBox(height: 48),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: () async {
-                  await _authService.saveProfile(
-                    name: nameController.text,
-                    email: emailController.text,
-                    profileImage: base64Image,
-                  );
-                  if (context.mounted) {
-                    FocusScope.of(context).unfocus();
-                    Fluttertoast.showToast(msg: "Profile updated and synced!");
-                    Navigator.pop(context);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 0,
-                ),
-                child: const Text(
-                  'Save Changes',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ),
+
+            PrimaryButton(
+              text: 'Save Changes',
+              isLoading: isLoading,
+              onPressed: () async {
+                setState(() => isLoading = true);
+                await _authService.saveProfile(
+                  name: nameController.text,
+                  email: emailController.text,
+                  profileImage: base64Image,
+                );
+                if (context.mounted) {
+                  FocusScope.of(context).unfocus();
+                  Fluttertoast.showToast(msg: "Profile updated and synced!");
+                  setState(() => isLoading = false);
+                  Navigator.pop(context);
+                }
+              },
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  InputDecoration _inputStyle(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.3)),
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Colors.black, width: 1.5),
       ),
     );
   }

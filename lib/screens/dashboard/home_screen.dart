@@ -23,9 +23,6 @@ import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
 
-// ===============
-// 4. HOME SCREEN
-// ===============
 class HomeScreen extends StatefulWidget {
   final String userName;
   const HomeScreen({super.key, required this.userName});
@@ -59,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ?.requestNotificationsPermission();
 
     _schedulesStream = _firestoreService.schedulesStreamForCurrentUser();
-
+// Listen to realtime classroom updates and recalculate protection alarms.
     _scheduleSubscription = _schedulesStream.listen((snapshot) async {
       _alarmService.recalculateAlarms(snapshot.docs);
       _currentSchedules = snapshot.docs;
@@ -72,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
         //_checkAndShowPermissionWarning();
       }
     });
-
+// Periodically verify active schedules to keep protection state synchronized.
     _minuteTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (mounted) {
         setState(() {});
@@ -80,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
   }
-
+// Main automation loop for activating app lock and silent mode based on schedules.
   Future<void> _checkSchedulesState() async {
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     final now = DateTime.now();
@@ -178,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _displayName = profileName;
     });
   }
-
+// Detect disabled critical permissions that may break protection features.
   Future<void> _checkAndShowPermissionWarning() async {
     bool dndStatus = await PermissionHandler.permissionsGranted ?? false;
     bool accStatus = false;
@@ -323,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     return "${weekdays[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}, ${now.year}";
   }
-
+// Determine whether a classroom session is currently active in real time.
   bool _isCourseCurrentlyRunning(Course course) {
     if (!course.isActive) return false;
     final now = DateTime.now();

@@ -11,7 +11,7 @@ import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
-
+// Display native Android notifications for focus session state changes.
 Future<void> showClassGuardNotification({
   required int id,
   required String title,
@@ -26,7 +26,6 @@ Future<void> showClassGuardNotification({
     android: androidInit,
   );
 
-  // FIX 1: Parameternya adalah 'settings:' BUKAN 'initializationSettings:'
   await plugin.initialize(
     settings: initSettings,
   );
@@ -43,8 +42,6 @@ Future<void> showClassGuardNotification({
     android: androidDetails,
   );
 
-  // FIX 2: Semua parameter wajib dipanggil pakai namanya (named parameters)
-  // dan parameter terakhir namanya berubah jadi 'notificationDetails:'
   await plugin.show(
     id: id,
     title: title,
@@ -52,7 +49,9 @@ Future<void> showClassGuardNotification({
     notificationDetails: platformDetails,
   );
 }
+// Must remain top-level for Android background isolate execution.
 @pragma('vm:entry-point')
+// Activate silent mode and app lock when scheduled classroom session starts.
 void startClassGuard() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -130,6 +129,7 @@ void startClassGuard() async {
 }
 
 @pragma('vm:entry-point')
+// Restore normal device state after focus session has ended.
 void stopClassGuard() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -140,7 +140,6 @@ void stopClassGuard() async {
     await Future.delayed(const Duration(milliseconds: 500));
     VolumeController().setVolume(prevVol);
 
-    // Matikan status lock aktif dan warmup aktif sekaligus
     await prefs.setBool('isAppLockActive', false);
     await prefs.setBool('isWarmupActive', false);
 

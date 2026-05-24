@@ -5,9 +5,6 @@ import 'package:classguard/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-// ======================
-// 7. SELECT APPS SCREEN
-// ======================
 class SelectAppsScreen extends StatefulWidget {
   final List<String> initialSelectedApps;
   const SelectAppsScreen({super.key, required this.initialSelectedApps});
@@ -48,7 +45,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
       setState(() => _isLoadingMaster = false);
     }
   }
-
+// Load installed applications directly from native Android package manager.
   Future<void> _fetchInstalledApps() async {
     try {
       final List<dynamic> apps = await platformAppInfo.invokeMethod(
@@ -72,7 +69,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
       }
     });
   }
-
+// Return selected blocked apps back to schedule configuration screen.
   void _saveSelection() {
     List<String> finalBlockedApps = _selectedPackages.toSet().toList();
     Navigator.pop(context, finalBlockedApps);

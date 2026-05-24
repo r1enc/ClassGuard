@@ -15,9 +15,10 @@ import android.widget.TextView
 
 class SilentPopupActivity : Activity() {
 
-    //-------------------
+    //-------------------------
     // UI SETUP & POPUP DIALOG
-    //-------------------
+    //-------------------------
+    // Fullscreen security popup displayed when critical permissions are disabled.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -78,6 +79,7 @@ class SilentPopupActivity : Activity() {
                 setMargins(dpToPx(20), 0, dpToPx(20), dpToPx(20))
             }
             isClickable = true
+            // Redirect user directly into Android accessibility settings.
             setOnClickListener {
                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -97,6 +99,6 @@ class SilentPopupActivity : Activity() {
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
-
+    // Disable back navigation while security popup is active.
     override fun onBackPressed() {}
 }

@@ -21,7 +21,7 @@ class FirestoreService {
   ) {
     return _firestore.collection('schedules').doc(scheduleId).snapshots();
   }
-
+// Prevent overlapping schedules and prioritize classroom sessions over personal schedules.
   Future<String?> checkAndHandleCollision(
     String newDay,
     String newStart,
@@ -156,7 +156,7 @@ class FirestoreService {
       });
     }
   }
-
+// Create synchronized classroom session with shared focus settings.
   Future<String> createClassroom({
     required String subject,
     required String lecturer,
@@ -226,7 +226,7 @@ class FirestoreService {
       'joinTimes.$uid': joinTime,
     });
   }
-
+// Temporarily allow blocked app access for selected classroom members.
   Future<void> grantVipAccess({
     required String? scheduleId,
     required String studentUid,
@@ -246,7 +246,7 @@ class FirestoreService {
       'history': updatedHistory,
     });
   }
-
+// Save attendance history before resetting classroom session state.
   Future<void> endClassSession({
     required String? scheduleId,
     required String uid,

@@ -7,10 +7,7 @@ import android.os.Build
 import android.util.Log
 
 class BootReceiver : BroadcastReceiver() {
-
-    //-------------------
-    // BOOT RECEIVER
-    //-------------------
+// Restore foreground protection service automatically after device reboot.
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_REBOOT) {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)

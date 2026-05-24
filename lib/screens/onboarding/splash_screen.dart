@@ -5,9 +5,6 @@ import 'package:classguard/screens/onboarding/permission_onboarding_screen.dart'
 import 'package:classguard/services/auth_service.dart';
 import 'package:flutter/material.dart';
 
-// ==================
-// 8. SPLASH SCREEN
-// ==================
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -25,7 +22,7 @@ class _SplashScreenState extends State<SplashScreen> {
       _navigateToNextScreen();
     });
   }
-
+// Restore onboarding and authentication state before entering the app.
   Future<void> _navigateToNextScreen() async {
     final splashState = await _authService.loadSplashUserState();
 

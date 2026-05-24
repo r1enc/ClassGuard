@@ -24,9 +24,9 @@ import android.widget.Toast
 import androidx.core.content.res.ResourcesCompat
 
 class LockActivity : Activity() {
-    //-------------------
+    //----------
     // VARIABLES
-    //-------------------
+    //----------
     private var enteredPin = ""
     private lateinit var pinDotsContainer: LinearLayout
     private lateinit var subtitleDisplay: TextView
@@ -37,9 +37,10 @@ class LockActivity : Activity() {
     private var wrongAttempts = 0
     private var isCooldown = false
 
-    //-------------------
+    //-----------------------------
     // ACTIVITY ONCREATE & UI SETUP
-    //-------------------
+    //-----------------------------
+    // Secure fullscreen lock screen displayed when blocked applications are opened.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -189,9 +190,9 @@ class LockActivity : Activity() {
         setContentView(rootLayout)
     }
 
-    //-------------------
+    //-------------
     // NUMPAD LOGIC
-    //-------------------
+    //-------------
     private fun handleBtnClick(value: String) {
         if (isCooldown) return
 
@@ -242,9 +243,9 @@ class LockActivity : Activity() {
         }
     }
 
-    //-------------------
+    //----------------------------
     // PIN VERIFICATION & COOLDOWN
-    //-------------------
+    //----------------------------
     private fun verifyPin() {
         if (enteredPin == correctPin) {
             Toast.makeText(this, "Access Granted for $allowanceTimeMinutes Minutes", Toast.LENGTH_LONG).show()
@@ -290,7 +291,7 @@ class LockActivity : Activity() {
                 } else {
                     isCooldown = false
                     wrongAttempts = 0
-                    subtitleDisplay.text = "" // DIKOSONGIN KEMBALI SAAT COOLDOWN SELESAI
+                    subtitleDisplay.text = "" 
                     subtitleDisplay.setTextColor(Color.parseColor("#555555"))
                 }
             }

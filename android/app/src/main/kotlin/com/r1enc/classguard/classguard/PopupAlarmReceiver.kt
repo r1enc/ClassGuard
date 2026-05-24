@@ -9,6 +9,7 @@ class PopupAlarmReceiver : BroadcastReceiver() {
     //-------------------
     // ALARM RECEIVER
     //-------------------
+    // Trigger emergency popup when accessibility protection is disabled.
     override fun onReceive(context: Context, intent: Intent) {
         if (!isAccessibilityServiceEnabled(context, AppLockService::class.java)) {
             val popupIntent = Intent(context, SilentPopupActivity::class.java).apply {

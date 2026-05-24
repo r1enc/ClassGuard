@@ -27,7 +27,7 @@ class MainActivity: FlutterActivity() {
     private val AUDIO_CHANNEL = "classguard/audio"
     private val APPLOCK_CHANNEL = "com.classguard/applock"
     private val APPINFO_CHANNEL = "com.classguard/app_info"
-
+// Native communication bridge between Flutter and Android system APIs.
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -107,6 +107,7 @@ class MainActivity: FlutterActivity() {
                     }
                     result.success(true)
                 }
+                // Manufacturer-specific autostart settings to improve background service reliability.
                 "requestAutoStartPermission" -> {
                     val intent = Intent()
                     val manufacturer = android.os.Build.MANUFACTURER.lowercase()
@@ -187,7 +188,7 @@ class MainActivity: FlutterActivity() {
         }
         return false
     }
-
+// Retrieve installed applications and usage statistics from Android system.
     private fun getInstalledApps(): List<Map<String, String>> {
         val appList = mutableListOf<Map<String, Any>>()
         val pm = packageManager

@@ -128,7 +128,7 @@ class AuthService {
 
     return AuthResult(name: finalName, email: finalEmail, studentId: finalId);
   }
-
+// Cache authenticated user data locally for fast session restoration.
   Future<void> saveLoggedInUser({
     required String name,
     required String email,
@@ -190,7 +190,7 @@ class AuthService {
       'profileImage': profileImage,
     });
   }
-
+// Prevent logout while focus session or app lock is currently active.
   Future<bool> canLogout() async {
     final prefs = await SharedPreferences.getInstance();
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -240,7 +240,7 @@ class AuthService {
     await prefs.clear();
     await FirebaseAuth.instance.signOut();
   }
-
+// Restore onboarding and login state during app startup.
   Future<SplashUserState> loadSplashUserState() async {
     final prefs = await SharedPreferences.getInstance();
     bool isSetupDone = prefs.getBool('isFirstTimeSetupDone') ?? false;

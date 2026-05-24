@@ -6,9 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
-// ========================
-// 4.1 CLASSROOM DASHBOARD
-// ========================
 class TeacherDashboardScreen extends StatelessWidget {
   final Course course;
   const TeacherDashboardScreen({super.key, required this.course});
@@ -43,7 +40,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     if (parts.length != 2) return 0;
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
-
+// Temporarily allow blocked app access for selected classroom members.
   void _showGrantAccessDialog(
     BuildContext context,
     String studentUid,
@@ -387,7 +384,7 @@ class TeacherDashboardScreen extends StatelessWidget {
       },
     );
   }
-
+// Display attendance history from previous classroom sessions.
   void _showHistory(
     BuildContext context,
     List<dynamic> history,

@@ -1,9 +1,11 @@
+// Convert HH:mm format into total minutes.
 int timeToMinutes(String time) {
   final parts = time.split(':');
   if (parts.length != 2) return 0;
   return int.parse(parts[0]) * 60 + int.parse(parts[1]);
 }
-
+// Find the next upcoming occurrence
+// for a schedule based on day and time.
 DateTime getNextOccurrence(String dayStr, String timeStr) {
   final days = {
     "Mon": 1,

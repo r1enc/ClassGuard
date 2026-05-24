@@ -1,3 +1,4 @@
+// Core classroom and schedule model shared across personal and synced sessions.
 class Course {
   String? id;
   String subject;

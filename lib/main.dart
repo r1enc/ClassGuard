@@ -13,9 +13,6 @@ void main() async {
   runApp(const ClassGuardApp());
 }
 
-// ==============
-// 2. APP THEME
-// ==============
 class ClassGuardApp extends StatelessWidget {
   const ClassGuardApp({super.key});
 
@@ -45,15 +42,13 @@ class ClassGuardApp extends StatelessWidget {
   }
 }
 
-// ===================================================
 // BACKGROUND WAKE UP (KEEP THIS IN MAIN.DART)
-// ===================================================
+// Must remain top-level for Android background isolate execution.
 @pragma('vm:entry-point')
 void wakeUpClassGuard() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   
-  // Set sinyal warmup aktif tanpa manual menambahkan prefix 'flutter.'
   await prefs.setBool('isWarmupActive', true);
   
   debugPrint("ClassGuard Warmup: Background Isolate Awakened & Satpam Siaga!");

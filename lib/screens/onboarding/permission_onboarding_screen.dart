@@ -1,25 +1,22 @@
 import 'package:auto_start_flutter/auto_start_flutter.dart';
 import 'package:classguard/screens/auth/auth_screen.dart';
+import 'package:classguard/theme/app_theme.dart';
+import 'package:classguard/widgets/primary_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sound_mode/permission_handler.dart';
 
-// =================================
-// 2.1 PERMISSION ONBOARDING SCREEN
-// =================================
 class PermissionOnboardingScreen extends StatefulWidget {
   final bool isFromSettings;
   const PermissionOnboardingScreen({super.key, this.isFromSettings = false});
 
   @override
-  State<PermissionOnboardingScreen> createState() =>
-      _PermissionOnboardingScreenState();
+  State<PermissionOnboardingScreen> createState() => _PermissionOnboardingScreenState();
 }
 
-class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
-    with WidgetsBindingObserver {
+class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen> with WidgetsBindingObserver {
   bool isDndGranted = false;
   bool isAccessibilityGranted = false;
   bool isOverlayGranted = false;
@@ -48,7 +45,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
       _checkAllPermissions();
     }
   }
-
+// Recheck all critical Android permissions whenever onboarding screen resumes.
   Future<void> _checkAllPermissions() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool autoStartMemory = prefs.getBool('isAutoStartConfigured') ?? false;
@@ -60,14 +57,10 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     bool usageStatus = false;
 
     try {
-      accStatus =
-          await platform.invokeMethod('checkAccessibilityPermission') ?? false;
-      ovrStatus =
-          await platform.invokeMethod('checkOverlayPermission') ?? false;
-      batStatus =
-          await platform.invokeMethod('checkBatteryOptimization') ?? false;
-      usageStatus =
-          await platform.invokeMethod('checkUsagePermission') ?? false;
+      accStatus = await platform.invokeMethod('checkAccessibilityPermission') ?? false;
+      ovrStatus = await platform.invokeMethod('checkOverlayPermission') ?? false;
+      batStatus = await platform.invokeMethod('checkBatteryOptimization') ?? false;
+      usageStatus = await platform.invokeMethod('checkUsagePermission') ?? false;
     } catch (e) {}
 
     setState(() {
@@ -81,14 +74,10 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   }
 
   void _requestDND() async => await PermissionHandler.openDoNotDisturbSetting();
-  void _requestUsage() async =>
-      await platform.invokeMethod('requestUsagePermission');
-  void _requestAccessibility() async =>
-      await platform.invokeMethod('openAccessibilitySettings');
-  void _requestOverlay() async =>
-      await platform.invokeMethod('requestOverlayPermission');
-  void _requestBattery() async =>
-      await platform.invokeMethod('requestBatteryOptimization');
+  void _requestUsage() async => await platform.invokeMethod('requestUsagePermission');
+  void _requestAccessibility() async => await platform.invokeMethod('openAccessibilitySettings');
+  void _requestOverlay() async => await platform.invokeMethod('requestOverlayPermission');
+  void _requestBattery() async => await platform.invokeMethod('requestBatteryOptimization');
 
   void _requestAutoStart() async {
     try {
@@ -103,7 +92,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     });
     Fluttertoast.showToast(msg: "Auto Start configured.");
   }
-
+// Block app access until all required, protection permissions are granted.
   void _proceedToAuth(BuildContext context) async {
     if (!isDndGranted ||
         !isAccessibilityGranted ||
@@ -112,9 +101,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
         !isUsageGranted ||
         !isAutoStartConfigured) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please grant all required permissions first.'),
-        ),
+        const SnackBar(content: Text('Please grant all required permissions first.')),
       );
       return;
     }
@@ -123,11 +110,12 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
     } else {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isFirstTimeSetupDone', true);
-      if (context.mounted)
+      if (context.mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const AuthScreen()),
         );
+      }
     }
   }
 
@@ -135,22 +123,25 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
   Widget build(BuildContext context) {
     bool allGranted =
         isDndGranted &&
-        isAccessibilityGranted &&
-        isOverlayGranted &&
-        isBatteryGranted &&
-        isUsageGranted &&
-        isAutoStartConfigured;
+            isAccessibilityGranted &&
+            isOverlayGranted &&
+            isBatteryGranted &&
+            isUsageGranted &&
+            isAutoStartConfigured;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       appBar: widget.isFromSettings
           ? AppBar(
-              title: const Text(
-                'System Permissions',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              centerTitle: true,
-            )
+        backgroundColor: AppTheme.backgroundColor,
+        foregroundColor: AppTheme.textDark,
+        title: const Text(
+          'System Permissions',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        centerTitle: true,
+        elevation: 0,
+      )
           : null,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -160,28 +151,16 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
             children: [
               if (!widget.isFromSettings) ...[
                 const SizedBox(height: 24),
-                const Icon(
-                  Icons.settings_suggest,
-                  size: 64,
-                  color: Colors.black,
-                ),
+                const Icon(Icons.settings_suggest, size: 64, color: AppTheme.primaryColor),
                 const SizedBox(height: 32),
                 const Text(
                   'Setup Permissions',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                 ),
                 const SizedBox(height: 16),
                 const Text(
                   'To make ClassGuard work seamlessly, we need access to a few core system settings.',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.black54,
-                    height: 1.5,
-                  ),
+                  style: TextStyle(fontSize: 16, color: AppTheme.textLight, height: 1.5),
                 ),
                 const SizedBox(height: 48),
               ],
@@ -235,32 +214,9 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
               ),
 
               const SizedBox(height: 48),
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: allGranted ? () => _proceedToAuth(context) : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: allGranted
-                        ? Colors.black
-                        : Colors.grey.shade300,
-                    foregroundColor: allGranted ? Colors.white : Colors.black38,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    elevation: 0,
-                  ),
-                  child: Text(
-                    widget.isFromSettings
-                        ? 'Done'
-                        : (allGranted ? 'Continue' : 'Permissions Required'),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
+              PrimaryButton(
+                text: widget.isFromSettings ? 'Done' : (allGranted ? 'Continue' : 'Permissions Required'),
+                onPressed: allGranted ? () => _proceedToAuth(context) : null,
               ),
             ],
           ),
@@ -280,12 +236,10 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isGranted
-            ? Colors.green.withValues(alpha: 0.05)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        color: isGranted ? Colors.green.withValues(alpha: 0.05) : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
         border: Border.all(
-          color: isGranted ? Colors.green.shade200 : Colors.black12,
+          color: isGranted ? Colors.green.shade200 : AppTheme.borderColor,
         ),
       ),
       child: Row(
@@ -293,13 +247,13 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: AppTheme.iconBackground,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
               icon,
               size: 24,
-              color: isGranted ? Colors.green : Colors.black87,
+              color: isGranted ? Colors.green : AppTheme.textDark,
             ),
           ),
           const SizedBox(width: 16),
@@ -309,19 +263,12 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.black54,
-                    height: 1.4,
-                  ),
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textLight, height: 1.4),
                 ),
               ],
             ),
@@ -333,7 +280,7 @@ class _PermissionOnboardingScreenState extends State<PermissionOnboardingScreen>
             ElevatedButton(
               onPressed: onRequest,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
+                backgroundColor: AppTheme.primaryColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
               ),

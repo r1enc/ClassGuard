@@ -18,26 +18,25 @@ class ProtectionService : Service() {
     private var isMonitoring = false
     private lateinit var prefs: SharedPreferences
 
-    //-------------------
+    //---------------------
     // MONITORING RUNNABLE
-    //-------------------
+    //---------------------
+    // Continuously monitor protection state and accessibility service status.
     private val monitorRunnable = object : Runnable {
         override fun run() {
             if (isMonitoring) {
                 val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
                 val isWarmupActive = prefs.getBoolean("flutter.isWarmupActive", false)
-
-                // 1. Satpam bunuh diri HANYA JIKA dua mode ini mati
+                // Keep service alive while focus mode or warmup mode is still active.
                 if (!isAppLockActive && !isWarmupActive) {
                     stopSelf()
                     return
                 }
 
-                // 2. Update Teks Notifikasi secara dinamis!
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 val launchIntent = Intent(this@ProtectionService, MainActivity::class.java)
                 val pendingIntent = PendingIntent.getActivity(this@ProtectionService, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
+                // Dynamically update foreground notification based on current protection state.
                 val titleText = if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
                 val contentText = if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
 
@@ -49,9 +48,8 @@ class ProtectionService : Service() {
                     .setContentIntent(pendingIntent)
                     .build()
 
-                manager.notify(101, notification) // Update teks notifikasi di layar HP
-
-                // 3. Cek Izin Aksesibilitas
+                manager.notify(101, notification) 
+                // Detect disabled accessibility permission and display emergency recovery popup.
                 if (!isAccessibilityServiceEnabled(this@ProtectionService, AppLockService::class.java)) {
                     val lastPopupTime = prefs.getLong("last_popup_time", 0L)
                     val currentTime = System.currentTimeMillis()
@@ -74,9 +72,10 @@ class ProtectionService : Service() {
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
     }
 
-    //-------------------
+    //--------------------------
     // FOREGROUND SERVICE SETUP
-    //-------------------
+    //--------------------------
+    // Start persistent foreground service to reduce Android background termination.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 

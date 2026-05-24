@@ -22,7 +22,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
     private var currentForegroundPackage: String = ""
     private val handler = Handler(Looper.getMainLooper())
     private var isChecking = false
-
+// Continuously verify protection state and monitor critical permissions.
     private val checkRunnable = object : Runnable {
         override fun run() {
             val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
@@ -40,7 +40,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
             }
         }
     }
-
+// Start persistent protection service when focus mode or warmup becomes active.
     override fun onServiceConnected() {
         super.onServiceConnected()
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -54,7 +54,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         isChecking = true
         handler.post(checkRunnable)
     }
-
+// React to realtime protection state changes from Flutter SharedPreferences.
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
         if (key == "flutter.isAppLockActive" || key == "flutter.isWarmupActive") {
             val isLockActive = sharedPreferences?.getBoolean("flutter.isAppLockActive", false) ?: false
@@ -74,7 +74,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
             }
         }
     }
-
+// Monitor foreground application changes for realtime app lock enforcement.
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
@@ -84,7 +84,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
 
         checkAutoKick()
     }
-
+// Automatically redirect blocked apps into secure lock screen activity.
     private fun checkAutoKick() {
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
         if (!isAppLockActive || currentForegroundPackage.isEmpty()) return
@@ -127,7 +127,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
             startActivity(intent)
         }
     }
-
+// Validate all required Android permissions needed for ClassGuard protection features.
     private fun checkOtherPermissions(): Boolean {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val hasDnd = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) notificationManager.isNotificationPolicyAccessGranted else true
@@ -147,7 +147,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
 
         return hasDnd && hasUsage && hasOverlay && hasBattery
     }
-
+// Force emergency popup when critical permissions are disabled.
     private fun triggerEmergencyPopup() {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(
