@@ -11,6 +11,39 @@ import 'package:fluttertoast/fluttertoast.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  // Helper method to build swipeable cards for the "How to Use" tutorial
+  Widget _buildHowToCard(String title, String content) {
+    return Container(
+      // Margin applied horizontally to create space between swipeable cards
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const SizedBox(height: 12),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Text(content, style: const TextStyle(fontSize: 13, height: 1.6, color: Colors.black54)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -60,48 +93,81 @@ class SettingsScreen extends StatelessWidget {
             'Learn how to setup focus schedules',
             onTap: () {
               showModalBottomSheet(
-                context: context,
-                backgroundColor: AppTheme.backgroundColor,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                builder: (context) => Container(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'How to Use ClassGuard',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 16),
-                      const ExpansionTile(
-                        title: Text('Personal Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Text(
-                              '1. Go to Home and tap the + button.\n2. Select "Add Schedule".\n3. Set your day, time, and choose apps to block.\n4. Save, and your phone will auto-lock those apps on schedule.',
-                              style: TextStyle(height: 1.5),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const ExpansionTile(
-                        title: Text('Classroom', style: TextStyle(fontWeight: FontWeight.bold)),
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Text(
-                              'As a Teacher:\nTap + and select "Create Classroom". Share the generated code with your students.\n\nAs a Student:\nTap + and select "Join Classroom". Enter the code to sync your device with the teacher\'s rules.',
-                              style: TextStyle(height: 1.5),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                  context: context,
+                  backgroundColor: AppTheme.backgroundColor,
+                  isScrollControlled: true,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                   ),
-                ),
+                  builder: (context) {
+                    int currentIndex = 0;
+                    // Set viewportFraction to 0.9 to slightly reveal the next card, indicating swipeability
+                    final PageController pageController = PageController(viewportFraction: 0.9);
+
+                    // StatefulBuilder enables localized state updates without rebuilding the entire screen
+                    return StatefulBuilder(
+                      builder: (context, setModalState) => SafeArea(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 24),
+                                child: Text(
+                                  'How to Use ClassGuard',
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              // Snappable horizontal PageView replacing the standard ListView
+                              SizedBox(
+                                height: 220,
+                                child: PageView(
+                                  controller: pageController,
+                                  onPageChanged: (index) {
+                                    // Update the active index for the pagination dots
+                                    setModalState(() => currentIndex = index);
+                                  },
+                                  children: [
+                                    _buildHowToCard(
+                                        'Personal Schedule',
+                                        '1. Go to Home and tap the + button.\n2. Select "Add Schedule".\n3. Set your day, time, and choose apps to block.\n4. Save, and your phone will auto-lock those apps on schedule.'
+                                    ),
+                                    _buildHowToCard(
+                                        'Classroom',
+                                        'As a Teacher:\nTap + and select "Create Classroom". Share the generated code with your students.\n\nAs a Student:\nTap + and select "Join Classroom". Enter the code to sync your device with the teacher\'s rules.'
+                                    ),
+                                    _buildHowToCard(
+                                        'Exam Mode',
+                                        'As a Host:\nCreate a highly secure exam session. Monitor student presence and submissions in real-time.\n\nAs a Student:\nJoining this mode will strictly lock your device into the exam view until submission.'
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              // Dynamic pagination indicators matching the Home screen style
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: List.generate(3, (index) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  width: currentIndex == index ? 24 : 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: currentIndex == index ? Colors.black : Colors.black26,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                )),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
               );
             },
           ),
@@ -115,7 +181,8 @@ class SettingsScreen extends StatelessWidget {
             onTap: () async {
               final authService = AuthService();
               final canLogout = await authService.canLogout();
-// Prevent logout while active, focus protection is running.
+
+              // Prevent logout while an active focus protection schedule or exam session is running
               if (!canLogout) {
                 Fluttertoast.showToast(msg: "Cannot logout while a session is actively running.", backgroundColor: Colors.red);
                 return;
@@ -179,8 +246,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final idController = TextEditingController();
   final emailController = TextEditingController();
   final AuthService _authService = AuthService();
+
+  // Base64 string to store the selected profile image
   String? base64Image;
-  bool isLoading = false; 
+  bool isLoading = false;
 
   @override
   void initState() {
@@ -188,6 +257,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _loadProfileData();
   }
 
+  // Fetches current profile data from SharedPreferences
   Future<void> _loadProfileData() async {
     final profile = await _authService.loadProfileData();
     setState(() {
@@ -198,6 +268,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
   }
 
+  // Opens gallery, compresses the image, and converts it to a Base64 string
   Future<void> _pickImage() async {
     try {
       final pickedImage = await _authService.pickAndSaveProfileImage();
@@ -312,6 +383,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               isLoading: isLoading,
               onPressed: () async {
                 setState(() => isLoading = true);
+
+                // Persist updated profile details to local storage
                 await _authService.saveProfile(
                   name: nameController.text,
                   email: emailController.text,

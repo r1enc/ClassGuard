@@ -16,6 +16,7 @@ class Course {
   int allowanceTime;
   List<dynamic> blockedApps;
   bool isOwner;
+  String? createdBy;
 
   Course({
     this.id,
@@ -34,5 +35,6 @@ class Course {
     this.allowanceTime = 0,
     this.blockedApps = const [],
     this.isOwner = true,
+    this.createdBy,
   });
 }

@@ -17,18 +17,18 @@ class FirestoreService {
   }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> scheduleStream(
-    String? scheduleId,
-  ) {
+      String? scheduleId,
+      ) {
     return _firestore.collection('schedules').doc(scheduleId).snapshots();
   }
 // Prevent overlapping schedules and prioritize classroom sessions over personal schedules.
   Future<String?> checkAndHandleCollision(
-    String newDay,
-    String newStart,
-    String newEnd,
-    String newRole, {
-    String? excludeId,
-  }) async {
+      String newDay,
+      String newStart,
+      String newEnd,
+      String newRole, {
+        String? excludeId,
+      }) async {
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
     final snapshot = await _firestore
@@ -138,6 +138,7 @@ class FirestoreService {
     } else {
       await _firestore.collection('schedules').add({
         'userId': uid,
+        'createdBy': uid,
         'joinedStudents': [uid],
         'subject': subject,
         'lecturer': lecturer.isNotEmpty ? lecturer : '-',
@@ -175,6 +176,7 @@ class FirestoreService {
 
     await _firestore.collection('schedules').add({
       'userId': uid,
+      'createdBy': uid,
       'joinedStudents': [uid],
       'studentNames': {},
       'studentIds': {},

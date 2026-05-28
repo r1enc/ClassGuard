@@ -40,13 +40,15 @@ class LockActivity : Activity() {
     //-----------------------------
     // ACTIVITY ONCREATE & UI SETUP
     //-----------------------------
-    // Secure fullscreen lock screen displayed when blocked applications are opened.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
         correctPin = prefs.getString("flutter.securityPIN", "1234") ?: "1234"
         allowanceTimeMinutes = prefs.getLong("flutter.allowanceTime", 1L).toInt()
+        
+        // CHECK IF EXAM IS ACTIVE
+        val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
 
         val appNameRaw = intent.getStringExtra("blocked_package") ?: "App"
         var appName = appNameRaw
@@ -108,7 +110,8 @@ class LockActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "App Locked"
+            // CHANGE TITLE FOR EXAM MODE (No Emotes)
+            text = if (isExamLockActive) "Exam in Progress" else "App Locked"
             setTextColor(Color.BLACK)
             textSize = 22f
             typeface = montserratBold
@@ -117,8 +120,9 @@ class LockActivity : Activity() {
         }
 
         subtitleDisplay = TextView(this).apply {
-            text = "" // DIKOSONGIN BIAR AESTHETIC
-            setTextColor(Color.parseColor("#555555"))
+            // CHANGE SUBTITLE FOR EXAM MODE (No Emotes)
+            text = if (isExamLockActive) "You are not allowed to leave" else "" 
+            setTextColor(if (isExamLockActive) Color.parseColor("#D32F2F") else Color.parseColor("#555555"))
             textSize = 14f
             typeface = montserratRegular
             gravity = Gravity.CENTER
@@ -128,70 +132,101 @@ class LockActivity : Activity() {
         cardLayout.addView(title)
         cardLayout.addView(subtitleDisplay)
 
-        pinDotsContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dpToPx(40))
-        }
-        updatePinDots()
-        cardLayout.addView(pinDotsContainer)
-
-        val numpadContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
-
-        val rows = listOf(
-            listOf("1", "2", "3"),
-            listOf("4", "5", "6"),
-            listOf("7", "8", "9"),
-            listOf("Exit", "0", "Del")
-        )
-
-        for (row in rows) {
-            val rowLayout = LinearLayout(this).apply {
+        if (isExamLockActive) {
+            // EXAM MODE: Hide PIN and show return button
+            val returnBtn = TextView(this).apply {
+                text = "Return to Exam"
+                typeface = montserratBold
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                gravity = Gravity.CENTER
+                
+                val paddingV = dpToPx(14)
+                val paddingH = dpToPx(24)
+                setPadding(paddingH, paddingV, paddingH, paddingV)
+                
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#D32F2F")) // Red button
+                    cornerRadius = dpToPx(12).toFloat()
+                }
+                
+                isClickable = true
+                setOnClickListener {
+                    // Launch ClassGuard app again
+                    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                    startActivity(launchIntent)
+                    finish()
+                }
+            }
+            cardLayout.addView(returnBtn)
+            
+        } else {
+            // NORMAL MODE: Show PIN dots and numpad
+            pinDotsContainer = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
+                setPadding(0, 0, 0, dpToPx(40))
             }
-            for (btnText in row) {
-                val btn = TextView(this).apply {
-                    text = btnText
-                    typeface = montserratMedium
+            updatePinDots()
+            cardLayout.addView(pinDotsContainer)
+
+            val numpadContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+
+            val rows = listOf(
+                listOf("1", "2", "3"),
+                listOf("4", "5", "6"),
+                listOf("7", "8", "9"),
+                listOf("Exit", "0", "Del")
+            )
+
+            for (row in rows) {
+                val rowLayout = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
-
-                    val btnSize = dpToPx(70)
-                    layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
-                        setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
-                    }
-
-                    if (btnText == "Exit" || btnText == "Del") {
-                        textSize = 16f
-                        setTextColor(Color.parseColor("#666666"))
-                        setBackgroundColor(Color.TRANSPARENT)
-                    } else {
-                        textSize = 28f
-                        setTextColor(Color.BLACK)
-                        background = GradientDrawable().apply {
-                            shape = GradientDrawable.OVAL
-                            setColor(Color.parseColor("#0D000000"))
-                        }
-                    }
-
-                    isClickable = true
-                    setOnClickListener { handleBtnClick(btnText) }
                 }
-                rowLayout.addView(btn)
+                for (btnText in row) {
+                    val btn = TextView(this).apply {
+                        text = btnText
+                        typeface = montserratMedium
+                        gravity = Gravity.CENTER
+
+                        val btnSize = dpToPx(70)
+                        layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                            setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
+                        }
+
+                        if (btnText == "Exit" || btnText == "Del") {
+                            textSize = 16f
+                            setTextColor(Color.parseColor("#666666"))
+                            setBackgroundColor(Color.TRANSPARENT)
+                        } else {
+                            textSize = 28f
+                            setTextColor(Color.BLACK)
+                            background = GradientDrawable().apply {
+                                shape = GradientDrawable.OVAL
+                                setColor(Color.parseColor("#0D000000"))
+                            }
+                        }
+
+                        isClickable = true
+                        setOnClickListener { handleBtnClick(btnText) }
+                    }
+                    rowLayout.addView(btn)
+                }
+                numpadContainer.addView(rowLayout)
             }
-            numpadContainer.addView(rowLayout)
+            cardLayout.addView(numpadContainer)
         }
 
-        cardLayout.addView(numpadContainer)
         rootLayout.addView(cardLayout)
         setContentView(rootLayout)
     }
 
     //-------------
-    // NUMPAD LOGIC
+    // NUMPAD LOGIC (Only runs when not in Exam Mode)
     //-------------
     private fun handleBtnClick(value: String) {
         if (isCooldown) return
@@ -222,6 +257,8 @@ class LockActivity : Activity() {
     }
 
     private fun updatePinDots() {
+        if (!::pinDotsContainer.isInitialized) return
+        
         pinDotsContainer.removeAllViews()
         for (i in 0 until 4) {
             val dot = View(this).apply {

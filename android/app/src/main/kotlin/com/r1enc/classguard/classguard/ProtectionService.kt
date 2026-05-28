@@ -27,8 +27,10 @@ class ProtectionService : Service() {
             if (isMonitoring) {
                 val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
                 val isWarmupActive = prefs.getBoolean("flutter.isWarmupActive", false)
-                // Keep service alive while focus mode or warmup mode is still active.
-                if (!isAppLockActive && !isWarmupActive) {
+                val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
+                
+                // Keep service alive while focus mode, warmup mode, or exam mode is still active.
+                if (!isAppLockActive && !isWarmupActive && !isExamLockActive) {
                     stopSelf()
                     return
                 }
@@ -36,9 +38,10 @@ class ProtectionService : Service() {
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 val launchIntent = Intent(this@ProtectionService, MainActivity::class.java)
                 val pendingIntent = PendingIntent.getActivity(this@ProtectionService, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                
                 // Dynamically update foreground notification based on current protection state.
-                val titleText = if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
-                val contentText = if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
+                val titleText = if (isExamLockActive) "Exam Mode Active" else if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
+                val contentText = if (isExamLockActive) "Exam in progress. App Lock is active." else if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
 
                 val notification = NotificationCompat.Builder(this@ProtectionService, "classguard_protection")
                     .setContentTitle(titleText)
@@ -86,8 +89,10 @@ class ProtectionService : Service() {
         }
 
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
-        val titleText = if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
-        val contentText = if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
+        val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
+        
+        val titleText = if (isExamLockActive) "Exam Mode Active" else if (isAppLockActive) "ClassGuard is Active" else "ClassGuard Warming Up"
+        val contentText = if (isExamLockActive) "Exam in progress. App Lock is active." else if (isAppLockActive) "Focus mode is running. App Lock is active." else "Preparing focus mode for upcoming class..."
 
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
