@@ -18,7 +18,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
   bool _isShowingCreated = true;
 
-  // Utilize "FIRST_LOAD" string to explicitly identify the initial load state
+  // Utilize "FIRST_LOAD" string to explicitly identify the initial load state 
   // enabling the first item to be gracefully collapsed when tapped.
   String? _expandedCreatedId = "FIRST_LOAD";
   String? _expandedJoinedId = "FIRST_LOAD";
@@ -32,7 +32,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     // Streams the global exams collection to find ones hosted by the current user
     _createdStream = FirebaseFirestore.instance.collection('exams').snapshots();
 
-    // --- ZERO-INDEX ARCHITECTURE ---
+    // ZERO-INDEX ARCHITECTURE
     // Instead of querying across all subcollections globally (which requires complex Firebase Indexes),
     // this directly accesses the localized summary path uniquely cloned into the user's document.
     _joinedStream = FirebaseFirestore.instance
@@ -143,27 +143,25 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                        child: const Text('HOSTED EXAM', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                      child: const Text('HOSTED EXAM', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24)
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.white24)
-                        ),
-                        child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                      ),
-                    ],
-                  ),
+                      child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    ),
+                  ],
                 ),
               ),
               PopupMenuButton<String>(
@@ -304,27 +302,25 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                        child: const Text('EXAM SUCCESS', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                      child: const Text('EXAM SUCCESS', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white24)
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.white24)
-                        ),
-                        child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                      ),
-                    ],
-                  ),
+                      child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    ),
+                  ],
                 ),
               ),
               PopupMenuButton<String>(
