@@ -52,8 +52,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
               style: TextStyle(color: AppTheme.textLight),
             ),
             const SizedBox(height: 32),
-            
-            // LIHAT NIH! Kodingan text field yang tadinya 20 baris sisa segini doang:
+
             TextField(
               controller: codeController,
               textCapitalization: TextCapitalization.characters,
@@ -61,8 +60,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
             ),
             
             const Spacer(),
-            
-            // LIHAT JUGA INI! Tombol hitam yang panjang banget sisa dipanggil gini doang:
+
             PrimaryButton(
               text: 'Join Classroom',
               isLoading: isLoading,
@@ -97,7 +95,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                   String roomDay = roomData['day'] ?? 'Mon';
                   String roomStart = roomData['startTime'] ?? '00:00';
                   String roomEnd = roomData['endTime'] ?? '00:00';
-// Prevent joining classrooms that overlap with existing active schedules.
+                  // Prevent joining classrooms that overlap with existing active schedules.
                   String? collisionError = await _firestoreService
                       .checkAndHandleCollision(
                         roomDay,

@@ -46,8 +46,8 @@ class LockActivity : Activity() {
 
         correctPin = prefs.getString("flutter.securityPIN", "1234") ?: "1234"
         allowanceTimeMinutes = prefs.getLong("flutter.allowanceTime", 1L).toInt()
-        
-        // CHECK IF EXAM IS ACTIVE
+
+        // Evaluates if the current session operates under strict Exam Mode protocols
         val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
 
         val appNameRaw = intent.getStringExtra("blocked_package") ?: "App"
@@ -110,19 +110,19 @@ class LockActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            // CHANGE TITLE FOR EXAM MODE (No Emotes)
+            // Evaluates and sets the monochrome title for Exam Mode
             text = if (isExamLockActive) "Exam in Progress" else "App Locked"
             setTextColor(Color.BLACK)
-            textSize = 22f
-            typeface = montserratBold
+            textSize = 24f
+            typeface = montserratMedium
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dpToPx(4))
         }
 
         subtitleDisplay = TextView(this).apply {
-            // CHANGE SUBTITLE FOR EXAM MODE (No Emotes)
-            text = if (isExamLockActive) "You are not allowed to leave" else "" 
-            setTextColor(if (isExamLockActive) Color.parseColor("#D32F2F") else Color.parseColor("#555555"))
+            // Displays black text subtitle for Exam Mode to fit the monochrome aesthetic
+            text = if (isExamLockActive) "You are not allowed to leave" else ""
+            setTextColor(if (isExamLockActive) Color.BLACK else Color.parseColor("#555555"))
             textSize = 14f
             typeface = montserratRegular
             gravity = Gravity.CENTER
@@ -133,35 +133,35 @@ class LockActivity : Activity() {
         cardLayout.addView(subtitleDisplay)
 
         if (isExamLockActive) {
-            // EXAM MODE: Hide PIN and show return button
+            // EXAM MODE: Hide PIN interface and construct a black monochrome return button
             val returnBtn = TextView(this).apply {
                 text = "Return to Exam"
                 typeface = montserratBold
                 setTextColor(Color.WHITE)
                 textSize = 16f
                 gravity = Gravity.CENTER
-                
+
                 val paddingV = dpToPx(14)
                 val paddingH = dpToPx(24)
                 setPadding(paddingH, paddingV, paddingH, paddingV)
-                
+
                 background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#D32F2F")) // Red button
+                    setColor(Color.BLACK)
                     cornerRadius = dpToPx(12).toFloat()
                 }
-                
+
                 isClickable = true
                 setOnClickListener {
-                    // Launch ClassGuard app again
+                    // Restores the exam interface by re-launching the application
                     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
                     startActivity(launchIntent)
                     finish()
                 }
             }
             cardLayout.addView(returnBtn)
-            
+
         } else {
-            // NORMAL MODE: Show PIN dots and numpad
+            // NORMAL MODE: Initialize PIN dots and numpad grid
             pinDotsContainer = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
@@ -226,7 +226,7 @@ class LockActivity : Activity() {
     }
 
     //-------------
-    // NUMPAD LOGIC (Only runs when not in Exam Mode)
+    // NUMPAD LOGIC
     //-------------
     private fun handleBtnClick(value: String) {
         if (isCooldown) return
@@ -258,7 +258,7 @@ class LockActivity : Activity() {
 
     private fun updatePinDots() {
         if (!::pinDotsContainer.isInitialized) return
-        
+
         pinDotsContainer.removeAllViews()
         for (i in 0 until 4) {
             val dot = View(this).apply {
@@ -328,7 +328,7 @@ class LockActivity : Activity() {
                 } else {
                     isCooldown = false
                     wrongAttempts = 0
-                    subtitleDisplay.text = "" 
+                    subtitleDisplay.text = ""
                     subtitleDisplay.setTextColor(Color.parseColor("#555555"))
                 }
             }

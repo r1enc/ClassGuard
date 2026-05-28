@@ -41,7 +41,7 @@ class _ExamSessionScreenState extends State<ExamSessionScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Fetch the exam details first to validate time constraints
+      // Fetch the exam details first to validate time constraints
       final examQuery = await FirebaseFirestore.instance
           .collection('exams')
           .where('examCode', isEqualTo: examCode)
@@ -57,7 +57,7 @@ class _ExamSessionScreenState extends State<ExamSessionScreen> {
       final examData = Exam.fromJson(examDoc.data(), examDoc.id);
       final now = DateTime.now();
 
-      // 2. Time Validation Logic
+      // Time Validation Logic
       if (now.isBefore(examData.startTime)) {
         final startHour = examData.startTime.hour.toString().padLeft(2, '0');
         final startMin = examData.startTime.minute.toString().padLeft(2, '0');
@@ -102,7 +102,7 @@ class _ExamSessionScreenState extends State<ExamSessionScreen> {
         return;
       }
 
-      // 3. If time is valid, proceed to join and generate submission document
+      // If time is valid, proceed to join and generate submission document
       final joinResult = await _examService.joinExamSession(examCode, studentName);
 
       if (mounted) {

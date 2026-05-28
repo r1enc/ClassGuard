@@ -100,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // --- HELPER METHODS ---
+  // HELPER METHODS
   // Evaluates if a given course is currently active based on system time
   bool _isCourseCurrentlyRunning(Course course) {
     if (!course.isActive) return false;
@@ -115,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return currentMins >= startMins && currentMins < endMins;
   }
 
-  // --- ONE-TIME TUTORIAL POPUP LOGIC ---
+  // ONE-TIME TUTORIAL POPUP LOGIC
   // Checks local storage to ensure the tutorial is only shown once per app installation
   Future<void> _checkAndShowTutorialPopup() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -467,7 +467,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return rawType;
   }
 
-  // --- REDESIGNED ACTIVE EXAM CARD ---
+  // REDESIGNED ACTIVE EXAM CARD
   // Builds a highly visible, distinct card for active exams hosted by the current user
   Widget _buildActiveExamCard(Exam exam, String examType) {
     final days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];

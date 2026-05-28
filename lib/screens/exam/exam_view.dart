@@ -146,14 +146,14 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     setState(() => _studentAnswers[questionId] = optionIndex);
   }
 
-  // --- ZERO-INDEX ARCHITECTURE (DUAL-WRITE SUBMISSION) ---
+  // ZERO-INDEX ARCHITECTURE (DUAL-WRITE SUBMISSION)
   // Submits data to both the Host's room and the Student's private profile simultaneously
   Future<void> _autoSubmitExam() async {
     if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
 
     try {
-      // 1. Submit answers to the Host's grading pool
+      // Submit answers to the Host's grading pool
       await _examService.submitExamAndGrade(
           widget.examId,
           widget.submissionId,
@@ -161,7 +161,7 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
           _examType
       );
 
-      // 2. Clone a summary of the exam into the student's personal directory
+      // Clone a summary of the exam into the student's personal directory
       // This eliminates the need for complex Firebase Indexes and safeguards student history
       final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
       if (uid.isNotEmpty) {

@@ -338,7 +338,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 }
 
                 setState(() => isLoading = true);
-// Prevent overlapping schedules before creating synchronized classroom sessions.
+                // Prevent overlapping schedules before creating synchronized classroom sessions.
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,

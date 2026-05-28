@@ -13,7 +13,7 @@ class ExamHistoryScreen extends StatefulWidget {
 }
 
 class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
-  // Fetch UID dynamically for current user
+  // Fetch UID dynamically for the current user
   String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? "";
 
   bool _isShowingCreated = true;
@@ -143,25 +143,27 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                      child: const Text('HOSTED EXAM', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white24)
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                        child: const Text('HOSTED EXAM', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
                       ),
-                      child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24)
+                        ),
+                        child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               PopupMenuButton<String>(
@@ -274,6 +276,14 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     String rawExamType = examData['examType'] ?? examData['type'] ?? 'Exam';
     String formattedExamType = _formatExamType(rawExamType);
 
+    // Format time and date string manually to match the required monochrome layout
+    final end = start.add(Duration(minutes: duration));
+    final startTimeStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
+    final endTimeStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
+    final months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    final weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    final dateStr = "${weekdays[start.weekday - 1]}, ${months[start.month - 1]} ${start.day}, ${start.year}";
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       margin: const EdgeInsets.only(bottom: 12),
@@ -291,11 +301,31 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-                child: const Text('EXAM SUCCESS', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                        child: const Text('EXAM SUCCESS', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24)
+                        ),
+                        child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: Colors.white70),
@@ -317,7 +347,21 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           const SizedBox(height: 6),
           Text(lecturer, style: const TextStyle(color: Colors.white70, fontSize: 14)),
           const SizedBox(height: 20),
-          Text(_formatDetailedTime(start, duration, formattedExamType), style: const TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w500)),
+          Row(
+            children: [
+              const Icon(Icons.access_time, color: Colors.white70, size: 16),
+              const SizedBox(width: 8),
+              Text('$startTimeStr - $endTimeStr • $duration Mins', style: const TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w500)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined, color: Colors.white70, size: 16),
+              const SizedBox(width: 8),
+              Text(dateStr, style: const TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w500)),
+            ],
+          ),
         ],
       ),
     );

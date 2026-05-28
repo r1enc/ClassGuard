@@ -329,7 +329,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 }
 
                 setState(() => isLoading = true);
-// Prevent overlapping schedules before saving personal focus sessions.
+                // Prevent overlapping schedules before saving personal focus sessions.
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,
