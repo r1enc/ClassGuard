@@ -1,6 +1,6 @@
-import 'package:classguard/routes/app_routes.dart';
-import 'package:classguard/screens/dashboard/home_screen.dart';
-import 'package:classguard/services/auth_service.dart';
+import 'package:classguard/core/routes/app_routes.dart';
+import 'package:classguard/features/dashboard/screens/home_screen.dart';
+import 'package:classguard/features/auth/services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';

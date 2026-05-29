@@ -1,7 +1,7 @@
 import 'package:auto_start_flutter/auto_start_flutter.dart';
-import 'package:classguard/screens/auth/auth_screen.dart';
-import 'package:classguard/theme/app_theme.dart';
-import 'package:classguard/widgets/primary_button.dart';
+import 'package:classguard/features/auth/screens/auth_screen.dart';
+import 'package:classguard/core/theme/app_theme.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';

@@ -1,9 +1,9 @@
-import 'package:classguard/routes/app_routes.dart';
-import 'package:classguard/screens/room/select_apps_screen.dart';
-import 'package:classguard/services/firestore_service.dart';
-import 'package:classguard/theme/app_theme.dart';
-import 'package:classguard/widgets/primary_button.dart';
-import 'package:classguard/widgets/setting_card.dart';
+import 'package:classguard/core/routes/app_routes.dart';
+import 'package:classguard/features/classroom/screens/select_apps_screen.dart';
+import 'package:classguard/core/services/firestore_service.dart';
+import 'package:classguard/core/theme/app_theme.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
+import 'package:classguard/shared/widgets/setting_card.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 

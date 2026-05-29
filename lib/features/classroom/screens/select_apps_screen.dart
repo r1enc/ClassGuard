@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:ui';
 
-import 'package:classguard/services/firestore_service.dart';
+import 'package:classguard/core/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 

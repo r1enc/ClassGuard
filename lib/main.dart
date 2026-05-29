@@ -1,5 +1,5 @@
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-import 'package:classguard/screens/onboarding/splash_screen.dart';
+import 'package:classguard/features/onboarding/screens/splash_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';

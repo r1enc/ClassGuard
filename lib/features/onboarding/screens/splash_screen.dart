@@ -1,8 +1,8 @@
-import 'package:classguard/routes/app_routes.dart';
-import 'package:classguard/screens/auth/auth_screen.dart';
-import 'package:classguard/screens/dashboard/home_screen.dart';
-import 'package:classguard/screens/onboarding/permission_onboarding_screen.dart';
-import 'package:classguard/services/auth_service.dart';
+import 'package:classguard/core/routes/app_routes.dart';
+import 'package:classguard/features/auth/screens/auth_screen.dart';
+import 'package:classguard/features/dashboard/screens/home_screen.dart';
+import 'package:classguard/features/onboarding/screens/permission_onboarding_screen.dart';
+import 'package:classguard/features/auth/services/auth_service.dart';
 import 'package:flutter/material.dart';
 
 class SplashScreen extends StatefulWidget {

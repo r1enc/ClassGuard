@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'package:classguard/models/exam.dart';
-import 'package:classguard/screens/exam/exam_dashboard.dart';
+import 'package:classguard/features/exam/screens/exam_dashboard.dart';
 
 class ExamHistoryScreen extends StatefulWidget {
   const ExamHistoryScreen({super.key});

@@ -1,5 +1,5 @@
 import 'package:classguard/models/course.dart';
-import 'package:classguard/services/firestore_service.dart';
+import 'package:classguard/core/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
