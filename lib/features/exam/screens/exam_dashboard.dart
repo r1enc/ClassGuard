@@ -7,7 +7,8 @@ import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../../models/exam.dart';
-import '../../widgets/primary_button.dart';
+import '../../shared/widgets/primary_button.dart';
+import '../../shared/feedback/empty_state.dart';
 
 class ExamDashboardScreen extends StatefulWidget {
   final Exam exam;
@@ -132,7 +133,8 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
               children: [
                 const Text('Students Joined', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 24),
-                studentDocs.isEmpty ? const Padding(padding: EdgeInsets.symmetric(vertical: 16.0), child: Text('No students joined yet.', style: TextStyle(color: Colors.black38)))
+                studentDocs.isEmpty 
+                    ? const EmptyState(message: 'No students joined yet.')
                     : ConstrainedBox(
                   constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
                   child: ListView.builder(
@@ -181,7 +183,7 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
                 const Text('Grading Reports', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 24),
                 studentDocs.isEmpty
-                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 16.0), child: Text('No grading reports available.', style: TextStyle(color: Colors.black38)))
+                    ? const EmptyState(message: 'No grading reports available.')
                     : ConstrainedBox(
                   constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
                   child: ListView.builder(

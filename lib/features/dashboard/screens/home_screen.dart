@@ -16,6 +16,8 @@ import 'package:classguard/features/exam/screens/exam_history.dart';
 import 'package:classguard/features/auth/services/auth_service.dart';
 import 'package:classguard/core/services/firestore_service.dart';
 import 'package:classguard/core/utils/time_utils.dart';
+import 'package:classguard/shared/feedback/empty_state.dart';
+import 'package:classguard/shared/feedback/status_badge.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -58,17 +60,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _alarmService = AlarmService(platform: platform);
     _loadProfileName();
 
-    // Request notification permissions for Android 13+ devices
     FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin
     >()
         ?.requestNotificationsPermission();
 
-    // Initialize the stream for current user's schedules
     _schedulesStream = _firestoreService.schedulesStreamForCurrentUser();
 
-    // Listen to schedule changes to automatically recalculate background alarms
     _scheduleSubscription = _schedulesStream.listen((snapshot) async {
       _alarmService.recalculateAlarms(snapshot.docs);
       _currentSchedules = snapshot.docs;
@@ -76,22 +75,18 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Trigger the one-time tutorial popup check after the UI is built
       _checkAndShowTutorialPopup();
 
       await Future.delayed(const Duration(seconds: 5));
-      // Display permission warning dialog if critical system permissions are missing
       if (mounted && !_hasShownPermissionWarning) {
         _hasShownPermissionWarning = true;
         _checkAndShowPermissionWarning();
       }
     });
 
-    // Background timer to constantly check schedule and exam statuses without relying solely on streams
     _minuteTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {});
-        // Execute heavy checking logic every 5 seconds to optimize performance and prevent UI lag
         if (timer.tick % 5 == 0) {
           _checkSchedulesState();
           _checkExpiredExams();
@@ -100,8 +95,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // HELPER METHODS
-  // Evaluates if a given course is currently active based on system time
   bool _isCourseCurrentlyRunning(Course course) {
     if (!course.isActive) return false;
     final now = DateTime.now();
@@ -115,8 +108,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return currentMins >= startMins && currentMins < endMins;
   }
 
-  // ONE-TIME TUTORIAL POPUP LOGIC
-  // Checks local storage to ensure the tutorial is only shown once per app installation
   Future<void> _checkAndShowTutorialPopup() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool hasSeenTutorial = prefs.getBool('hasSeenTutorial') ?? false;
@@ -144,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  // Soft black shadow to create depth and separate the popup from the monochrome home screen
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.4),
@@ -179,7 +169,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    // Dynamic pagination dots
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: List.generate(3, (index) => AnimatedContainer(
@@ -202,10 +191,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: ElevatedButton(
                           onPressed: () {
                             if (currentIndex < 2) {
-                              // Proceed to the next tutorial slide
                               pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeIn);
                             } else {
-                              // Finalize tutorial and save state to prevent it from appearing again
                               prefs.setBool('hasSeenTutorial', true);
                               Navigator.pop(context);
                             }
@@ -230,7 +217,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Generates individual slides for the tutorial popup
   Widget _buildTutorialSlide({required IconData icon, required String title, required String description}) {
     return Padding(
       padding: const EdgeInsets.all(32.0),
@@ -258,21 +244,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Automatically deactivates exam sessions when their allotted time has expired
   void _checkExpiredExams() {
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     final now = DateTime.now();
 
     for (var doc in _currentExams) {
       final data = doc.data() as Map<String, dynamic>;
-      // Only process exams owned by the current user that are still marked as active
       if (data['hostId'] == uid && data['isActive'] == true) {
         Timestamp? startTimestamp = data['startTime'] as Timestamp?;
         int duration = data['durationMinutes'] ?? 0;
         if (startTimestamp != null) {
           DateTime endTime = startTimestamp.toDate().add(Duration(minutes: duration));
           if (now.isAfter(endTime)) {
-            // Update Firestore to flag the exam as inactive, removing it from active dashboards
             FirebaseFirestore.instance.collection('exams').doc(doc.id).update({'isActive': false}).catchError((_) {});
           }
         }
@@ -280,7 +263,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Evaluates schedules to trigger hardware locks (silent mode, app blocking) based on the current time
   Future<void> _checkSchedulesState() async {
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     final now = DateTime.now();
@@ -297,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
         int end = timeToMinutes(data['endTime'] ?? "00:00");
 
         if (currentMins >= start && currentMins < end) {
-          // Teachers are exempt from restrictions in their own classrooms
           if (data['role'] == 'Teacher' && data['userId'] == uid) continue;
 
           bool wasActive = prefs.getBool('isAppLockActive') ?? false;
@@ -305,21 +286,18 @@ class _HomeScreenState extends State<HomeScreen> {
             double currentVol = await VolumeController().getVolume();
             await prefs.setDouble('prevVolume', currentVol);
 
-            // Execute hardware silent mode protocol
             if (data['isSilentModeEnabled'] == true) {
               try {
                 await SoundMode.setSoundMode(RingerModeStatus.silent);
                 await Future.delayed(const Duration(milliseconds: 500));
                 VolumeController().setVolume(0.0);
               } catch (e) {
-                // Catch block filled to prevent unused variable warning
                 debugPrint("Silent mode error: $e");
               }
             }
             Fluttertoast.showToast(msg: "Class started: Device is Silent & Distracting Apps Locked", toastLength: Toast.LENGTH_LONG);
           }
 
-          // Inject class rules into local preferences for the Kotlin Background Service
           List<dynamic> apps = data['blockedApps'] ?? [];
           await prefs.setString('blockedApps', apps.join(','));
           await prefs.setInt('allowanceTime', data['allowanceTime'] ?? 2);
@@ -327,12 +305,11 @@ class _HomeScreenState extends State<HomeScreen> {
           await prefs.setBool('isAppLockActive', data['isAppLockEnabled'] ?? true);
 
           foundActive = true;
-          break; // Stop evaluating after finding the first active schedule
+          break;
         }
       }
     }
 
-    // Revert hardware settings to normal if no schedules are currently active
     if (!foundActive) {
       bool wasActive = prefs.getBool('isAppLockActive') ?? false;
       if (wasActive) {
@@ -342,7 +319,6 @@ class _HomeScreenState extends State<HomeScreen> {
           await Future.delayed(const Duration(milliseconds: 500));
           VolumeController().setVolume(prevVol);
         } catch (e) {
-          // Catch block filled to prevent unused variable warning
           debugPrint("Normal mode error: $e");
         }
         Fluttertoast.showToast(msg: "Class ended: Device is back to normal", toastLength: Toast.LENGTH_LONG);
@@ -358,7 +334,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Scans for required device permissions and displays an alert if any are disabled
   Future<void> _checkAndShowPermissionWarning() async {
     bool dndStatus = await PermissionHandler.permissionsGranted ?? false;
     bool accStatus = false;
@@ -460,15 +435,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return "${weekdays[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}, ${now.year}";
   }
 
-  // Translates raw database strings into a cleaner format for the UI badges
   String _formatExamType(String rawType) {
     if (rawType.toLowerCase().contains('multiple')) return 'Multiple Choice';
     if (rawType.toLowerCase().contains('essay')) return 'Essay';
     return rawType;
   }
 
-  // REDESIGNED ACTIVE EXAM CARD
-  // Builds a highly visible, distinct card for active exams hosted by the current user
   Widget _buildActiveExamCard(Exam exam, String examType) {
     final days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
     final String dayStr = days[exam.startTime.weekday - 1];
@@ -484,7 +456,6 @@ class _HomeScreenState extends State<HomeScreen> {
         color: Colors.black,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.redAccent, width: 2),
-        // Aggressive drop shadow to ensure the card grabs attention
         boxShadow: [
           BoxShadow(
             color: Colors.redAccent.withValues(alpha: 0.25),
@@ -504,22 +475,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '$dayStr • EXAM',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
+                  StatusBadge.info('$dayStr • EXAM'),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
@@ -623,22 +579,9 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isRunning ? Colors.greenAccent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  isRunning ? 'ACTIVE NOW' : '${course.day.toUpperCase()} • ${course.role.toUpperCase()}',
-                  style: TextStyle(
-                    color: isRunning ? Colors.greenAccent : Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ),
+              isRunning
+                  ? StatusBadge.active()
+                  : StatusBadge.info('${course.day.toUpperCase()} • ${course.role.toUpperCase()}'),
               const Spacer(),
               Row(
                 children: [
@@ -742,7 +685,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (error == "OVERRIDDEN") {
                         Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
                       } else {
-                        // Prevent UI updates across async gaps if the widget was disposed
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
                         return;
@@ -839,7 +781,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (error == "OVERRIDDEN") {
                     Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
                   } else {
-                    // Prevent UI updates across async gaps if the widget was disposed
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
                     return;
@@ -1044,7 +985,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             final data = activeExams[index].data() as Map<String, dynamic>;
                             final exam = Exam.fromJson(data, activeExams[index].id);
 
-                            // Fetch raw type and format it cleanly for the badge
                             final rawExamType = data['examType'] ?? data['type'] ?? 'Exam';
                             final formattedExamType = _formatExamType(rawExamType.toString());
 
@@ -1063,14 +1003,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate((context, index) {
                         if (courseList.isEmpty) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 24),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24)),
-                              child: const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('No schedules yet. Tap + to add schedule or join a classroom.', style: TextStyle(color: Colors.white70, height: 1.5), textAlign: TextAlign.center)),
-                            ),
+                          return const EmptyState(
+                            message: 'No schedules yet. Tap + to add schedule or join a classroom.',
+                            isCard: true,
                           );
                         }
 

@@ -1,5 +1,7 @@
 import 'package:classguard/models/course.dart';
 import 'package:classguard/core/services/firestore_service.dart';
+import 'package:classguard/shared/feedback/empty_state.dart';
+import 'package:classguard/shared/dialogs/confirm_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -40,7 +42,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     if (parts.length != 2) return 0;
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
-// Temporarily allow blocked app access for selected classroom members.
+
   void _showGrantAccessDialog(
     BuildContext context,
     String studentUid,
@@ -281,14 +283,7 @@ class TeacherDashboardScreen extends StatelessWidget {
               const SizedBox(height: 16),
               Expanded(
                 child: studentNames.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No students have joined yet.',
-                          style: TextStyle(
-                            color: Colors.black.withValues(alpha: 0.5),
-                          ),
-                        ),
-                      )
+                    ? const EmptyState(message: 'No students have joined yet.')
                     : ListView.builder(
                         itemCount: studentNames.length,
                         itemBuilder: (context, index) {
@@ -384,7 +379,7 @@ class TeacherDashboardScreen extends StatelessWidget {
       },
     );
   }
-// Display attendance history from previous classroom sessions.
+
   void _showHistory(
     BuildContext context,
     List<dynamic> history,
@@ -412,14 +407,7 @@ class TeacherDashboardScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   Expanded(
                     child: history.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No history available.',
-                              style: TextStyle(
-                                color: Colors.black.withValues(alpha: 0.5),
-                              ),
-                            ),
-                          )
+                        ? const EmptyState(message: 'No history available.')
                         : ListView.builder(
                             itemCount: history.length,
                             itemBuilder: (context, index) {
@@ -453,78 +441,22 @@ class TeacherDashboardScreen extends StatelessWidget {
                                         color: Colors.red,
                                       ),
                                       onPressed: () {
-                                        showDialog(
+                                        ConfirmDialog.show(
                                           context: context,
-                                          builder: (BuildContext dialogContext) {
-                                            return AlertDialog(
-                                              backgroundColor: Colors.white,
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(16),
-                                              ),
-                                              title: const Text(
-                                                'Delete History',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              content: const Text(
-                                                'Are you sure you want to delete this attendance record? This action cannot be undone.',
-                                              ),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                        dialogContext,
-                                                      ),
-                                                  child: const Text(
-                                                    'Cancel',
-                                                    style: TextStyle(
-                                                      color: Colors.black54,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ElevatedButton(
-                                                  onPressed: () {
-                                                    List updatedHistory =
-                                                        List.from(history);
-                                                    updatedHistory.removeAt(
-                                                      history.length -
-                                                          1 -
-                                                          index,
-                                                    );
-                                                    FirestoreService()
-                                                        .updateAttendanceHistory(
-                                                          scheduleId: course.id,
-                                                          updatedHistory:
-                                                              updatedHistory,
-                                                        );
-                                                    Navigator.pop(
-                                                      dialogContext,
-                                                    );
-                                                    Navigator.pop(context);
-                                                    Fluttertoast.showToast(
-                                                      msg:
-                                                          "History record deleted.",
-                                                    );
-                                                  },
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                        backgroundColor:
-                                                            Colors.redAccent,
-                                                        foregroundColor:
-                                                            Colors.white,
-                                                      ),
-                                                  child: const Text(
-                                                    'Delete',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
+                                          title: 'Delete History',
+                                          content: 'Are you sure you want to delete this attendance record? This action cannot be undone.',
+                                          confirmText: 'Delete',
+                                          isDestructive: true,
+                                          onConfirm: () {
+                                            List updatedHistory = List.from(history);
+                                            updatedHistory.removeAt(history.length - 1 - index);
+                                            FirestoreService().updateAttendanceHistory(
+                                              scheduleId: course.id,
+                                              updatedHistory: updatedHistory,
                                             );
+                                            Navigator.pop(context); // Tutup dialog konfirmasi
+                                            Navigator.pop(context); // Tutup bottom sheet
+                                            Fluttertoast.showToast(msg: "History record deleted.");
                                           },
                                         );
                                       },
@@ -595,14 +527,16 @@ class TeacherDashboardScreen extends StatelessWidget {
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirestoreService().scheduleStream(course.id),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
               child: CircularProgressIndicator(color: Colors.black),
             );
+          }
 
           var docData = snapshot.data?.data() as Map<String, dynamic>?;
-          if (docData == null)
+          if (docData == null) {
             return const Center(child: Text('Classroom data not found.'));
+          }
 
           bool isActive = docData['isActive'] ?? false;
           final now = DateTime.now();
