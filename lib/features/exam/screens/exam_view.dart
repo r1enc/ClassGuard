@@ -4,10 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../widgets/primary_button.dart';
-import '../../models/exam.dart';
-import '../../services/exam_service.dart';
-import 'exam_result.dart';
+// REFACTORED IMPORTS
+import 'package:classguard/models/exam.dart';
+import 'package:classguard/features/exam/services/exam_service.dart';
+import 'package:classguard/features/exam/screens/exam_result.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
+import 'package:classguard/shared/dialogs/confirm_dialog.dart';
 
 class ExamViewScreen extends StatefulWidget {
   final String examId;
@@ -58,7 +60,6 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     super.dispose();
   }
 
-  // Continuously monitors the exam document; auto-submits if the host terminates the session prematurely
   void _listenToExamStatus() {
     _examStatusSubscription = _firestore.collection('exams').doc(widget.examId).snapshots().listen((snapshot) {
       if (snapshot.exists) {
@@ -70,11 +71,9 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     });
   }
 
-  // Engages the hardware lock constraints via Kotlin service flag
   Future<void> _lockDeviceAndMute() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      // Delay ensures the UI has fully transitioned before engaging screen pinning
       await Future.delayed(const Duration(seconds: 5));
       await prefs.setBool('isExamLockActive', true);
     } catch (e) {
@@ -82,7 +81,6 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     }
   }
 
-  // Disengages hardware locks safely upon exam completion or exit
   Future<void> _unlockDeviceAndRestoreSound() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -146,14 +144,11 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     setState(() => _studentAnswers[questionId] = optionIndex);
   }
 
-  // ZERO-INDEX ARCHITECTURE (DUAL-WRITE SUBMISSION)
-  // Submits data to both the Host's room and the Student's private profile simultaneously
   Future<void> _autoSubmitExam() async {
     if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
 
     try {
-      // Submit answers to the Host's grading pool
       await _examService.submitExamAndGrade(
           widget.examId,
           widget.submissionId,
@@ -161,8 +156,6 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
           _examType
       );
 
-      // Clone a summary of the exam into the student's personal directory
-      // This eliminates the need for complex Firebase Indexes and safeguards student history
       final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
       if (uid.isNotEmpty) {
         await _firestore
@@ -186,21 +179,6 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Submission failed: $e'), backgroundColor: Colors.red));
     }
-  }
-
-  void _confirmSubmit() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Submit Exam?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-        content: const Text('Are you sure you want to finish and submit your answers?', style: TextStyle(color: Colors.black87)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.black54))),
-          TextButton(onPressed: () { Navigator.pop(context); _autoSubmitExam(); }, child: const Text('Submit', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))),
-        ],
-      ),
-    );
   }
 
   @override
@@ -231,7 +209,20 @@ class _ExamViewScreenState extends State<ExamViewScreen> {
             ),
             Container(
               padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.black.withValues(alpha: 0.05)))),
-              child: PrimaryButton(text: 'Finish & Submit', isLoading: _isSubmitting, onPressed: _confirmSubmit),
+              // REUSABLE WIDGET: PrimaryButton & ConfirmDialog
+              child: PrimaryButton(
+                  text: 'Finish & Submit',
+                  isLoading: _isSubmitting,
+                  onPressed: () {
+                    ConfirmDialog.show(
+                      context: context,
+                      title: 'Submit Exam?',
+                      message: 'Are you sure you want to finish and submit your answers?',
+                      confirmText: 'Submit',
+                      onConfirm: _autoSubmitExam,
+                    );
+                  }
+              ),
             ),
           ],
         ),

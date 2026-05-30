@@ -12,7 +12,8 @@ class AlarmService {
 
   final MethodChannel platform;
   final List<int> activeAlarmIds = [];
-// Rebuild all scheduled alarms whenever classroom schedules change in realtime.
+
+  // Rebuild all scheduled alarms whenever classroom schedules change in realtime.
   void recalculateAlarms(List<QueryDocumentSnapshot> docs) {
     for (var id in activeAlarmIds) {
       AndroidAlarmManager.cancel(id);
@@ -50,7 +51,8 @@ class AlarmService {
       }
     }
   }
-// Schedule both Android alarms and native popup notifications.
+
+  // Schedule both Android alarms and native popup notifications.
   void setAutomaticAlarm(
       String timeStr,
       int alarmId,
@@ -61,6 +63,7 @@ class AlarmService {
     final now = DateTime.now();
     final parts = timeStr.split(':');
     if (parts.length != 2) return;
+    
     var scheduleTime = DateTime(
       now.year,
       now.month,
@@ -68,7 +71,11 @@ class AlarmService {
       int.parse(parts[0]),
       int.parse(parts[1]),
     );
-    if (scheduleTime.isBefore(now)) {
+
+    // CORE LOGIC UPDATE: Prevent pushing immediately upcoming alarms to tomorrow.
+    // Gives a 5-minute grace period so the warmup system can still trigger 
+    // when creating schedules near the exact start time.
+    if (scheduleTime.isBefore(now) && now.difference(scheduleTime).inMinutes > 5) {
       scheduleTime = scheduleTime.add(const Duration(days: 1));
     }
 
@@ -83,14 +90,17 @@ class AlarmService {
         wakeup: true,
       );
     }
+
     // MAIN ALARM
-    await AndroidAlarmManager.oneShot(
-      scheduleTime.difference(now),
-      alarmId,
-      callback,
-      exact: true,
-      wakeup: true,
-    );
+    if (scheduleTime.isAfter(now)) {
+      await AndroidAlarmManager.oneShot(
+        scheduleTime.difference(now),
+        alarmId,
+        callback,
+        exact: true,
+        wakeup: true,
+      );
+    }
 
     try {
       await platform.invokeMethod('setNativePopupAlarm', {

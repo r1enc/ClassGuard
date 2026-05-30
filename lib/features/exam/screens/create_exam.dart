@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/primary_button.dart';
-import 'create_exam_questions.dart';
+
+import 'package:classguard/core/theme/app_theme.dart';
+import 'package:classguard/features/exam/screens/create_exam_questions.dart';
+
+// SHARED COMPONENTS
+import 'package:classguard/shared/feedback/info_banner.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
 
 class CreateExamScreen extends StatefulWidget {
   const CreateExamScreen({super.key});
@@ -32,7 +36,6 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
   }
 
   void _goToAddQuestions() {
-    // Validate that all required fields are filled before proceeding
     if (titleController.text.isEmpty ||
         creatorController.text.isEmpty ||
         durationController.text.isEmpty ||
@@ -53,7 +56,6 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
           date: _selectedDate!,
           startTime: startTimeController.text,
           endTime: endTimeController.text,
-          // Temporarily left empty as a string to prevent legacy code from crashing
           securityPIN: "",
           examType: _selectedExamType,
         ),
@@ -77,16 +79,9 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: AppTheme.textDark, size: 20),
-                  SizedBox(width: 12),
-                  Expanded(child: Text("You are creating an exam session. A code will be generated for participants.", style: TextStyle(color: AppTheme.textDark, fontSize: 12))),
-                ],
-              ),
+            // REUSABLE WIDGET: InfoBanner replaced manual container
+            const InfoBanner(
+                message: "You are creating an exam session. A code will be generated for participants."
             ),
             const SizedBox(height: 24),
 
@@ -176,7 +171,12 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
             ),
             const SizedBox(height: 32),
 
-            PrimaryButton(text: 'Next: Add Questions', isLoading: _isLoading, onPressed: _goToAddQuestions),
+            // REUSABLE WIDGET
+            PrimaryButton(
+              text: 'Next: Add Questions',
+              isLoading: _isLoading,
+              onPressed: _goToAddQuestions,
+            ),
           ],
         ),
       ),

@@ -1,11 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/exam.dart';
+
+// REFACTORED IMPORT
+import 'package:classguard/models/exam.dart';
 
 class ExamService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Initializes a new exam session and stores all associated questions in a secure subcollection
+  // CORE LOGIC: Initialize new exam session and store questions
   Future<void> createExamSession(Exam exam, List<Question> questions, String examType) async {
     try {
       DocumentReference examRef = _firestore.collection('exams').doc();
@@ -16,7 +18,6 @@ class ExamService {
 
       batch.set(examRef, examData);
 
-      // Store questions systematically using batch writes to ensure atomic data insertion
       for (var question in questions) {
         DocumentReference questionRef = examRef.collection('questions').doc();
         batch.set(questionRef, question.toJson());
@@ -28,12 +29,11 @@ class ExamService {
     }
   }
 
-  // Validates the exam code and registers a student into the session's active submission pool
+  // CORE LOGIC: Validate exam code and register student
   Future<Map<String, String>> joinExamSession(String examCode, String studentName) async {
     try {
       String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-      // Locate the active exam room corresponding to the provided unique code
       QuerySnapshot query = await _firestore
           .collection('exams')
           .where('examCode', isEqualTo: examCode)
@@ -47,7 +47,6 @@ class ExamService {
 
       String examId = query.docs.first.id;
 
-      // Prevent multiple joins by checking if the current student ID already exists within the active submissions
       QuerySnapshot existingSubmission = await _firestore
           .collection('exams')
           .doc(examId)
@@ -66,7 +65,6 @@ class ExamService {
           .collection('submissions')
           .doc();
 
-      // Create an initial empty submission placeholder to track live student presence
       Submission initialSubmission = Submission(
         id: newSubmissionRef.id,
         studentName: studentName,
@@ -78,7 +76,7 @@ class ExamService {
 
       Map<String, dynamic> subData = initialSubmission.toJson();
       subData['joinedAt'] = FieldValue.serverTimestamp();
-      subData['studentId'] = uid; // Store student ID for future validation
+      subData['studentId'] = uid;
 
       await newSubmissionRef.set(subData);
 
@@ -91,12 +89,11 @@ class ExamService {
     }
   }
 
-  // Finalizes the student's submission and performs automatic server-side grading
+  // CORE LOGIC: Finalize submission and auto-grade
   Future<void> submitExamAndGrade(String examId, String submissionId, Map<String, dynamic> studentAnswers, String examType) async {
     try {
       double finalScore = 0.0;
 
-      // Automatically calculate the score exclusively for multiple choice formats
       if (examType == 'multiple_choice') {
         QuerySnapshot questionsSnapshot = await _firestore
             .collection('exams')
@@ -109,7 +106,6 @@ class ExamService {
 
         for (var doc in questionsSnapshot.docs) {
           Question q = Question.fromJson(doc.data() as Map<String, dynamic>, doc.id);
-          // Increment score if the student's recorded answer aligns with the correct index
           if (studentAnswers.containsKey(q.id) && studentAnswers[q.id] == q.correctIndex) {
             correctAnswersCount++;
           }
@@ -118,7 +114,6 @@ class ExamService {
         finalScore = totalQuestions > 0 ? (correctAnswersCount / totalQuestions) * 100 : 0.0;
       }
 
-      // Update the existing submission placeholder with the finalized answers and calculated score
       await _firestore
           .collection('exams')
           .doc(examId)

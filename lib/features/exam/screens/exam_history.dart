@@ -5,6 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:classguard/models/exam.dart';
 import 'package:classguard/features/exam/screens/exam_dashboard.dart';
 
+// UI KIT IMPORTS
+import 'package:classguard/shared/feedback/empty_state.dart';
+import 'package:classguard/shared/dialogs/confirm_dialog.dart';
+import 'package:classguard/shared/widgets/exam_card.dart';
+
 class ExamHistoryScreen extends StatefulWidget {
   const ExamHistoryScreen({super.key});
 
@@ -13,13 +18,10 @@ class ExamHistoryScreen extends StatefulWidget {
 }
 
 class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
-  // Fetch UID dynamically for the current user
   String get _currentUid => FirebaseAuth.instance.currentUser?.uid ?? "";
 
+  // STATE MANAGEMENT: Track which tab is active and which card is expanded
   bool _isShowingCreated = true;
-
-  // Utilize "FIRST_LOAD" string to explicitly identify the initial load state 
-  // enabling the first item to be gracefully collapsed when tapped.
   String? _expandedCreatedId = "FIRST_LOAD";
   String? _expandedJoinedId = "FIRST_LOAD";
 
@@ -29,12 +31,8 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    // Streams the global exams collection to find ones hosted by the current user
+    // CORE LOGIC: Initialize streams for both created and joined exams
     _createdStream = FirebaseFirestore.instance.collection('exams').snapshots();
-
-    // ZERO-INDEX ARCHITECTURE
-    // Instead of querying across all subcollections globally (which requires complex Firebase Indexes),
-    // this directly accesses the localized summary path uniquely cloned into the user's document.
     _joinedStream = FirebaseFirestore.instance
         .collection('users')
         .doc(_currentUid)
@@ -42,25 +40,10 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
         .snapshots();
   }
 
-  // Translates raw database strings into a cleaner format for the UI badges
   String _formatExamType(String rawType) {
     if (rawType.toLowerCase().contains('multiple')) return 'Multiple Choice';
     if (rawType.toLowerCase().contains('essay')) return 'Essay';
     return rawType;
-  }
-
-  // Formats start and end times along with exam duration for history cards
-  String _formatDetailedTime(DateTime start, int durationMins, String examType) {
-    final end = start.add(Duration(minutes: durationMins));
-
-    final startTimeStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
-    final endTimeStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
-
-    final months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    final weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    final dateStr = "${weekdays[start.weekday - 1]}, ${months[start.month - 1]} ${start.day}, ${start.year}";
-
-    return "$startTimeStr - $endTimeStr • $durationMins Mins • $examType • $dateStr";
   }
 
   String _getBasicFormattedDate(DateTime time) {
@@ -68,6 +51,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     return "${time.day} ${months[time.month - 1]} ${time.year}";
   }
 
+  // STATE MANAGEMENT: Toggle between created and joined views
   Widget _buildTopToggle() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -116,106 +100,6 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     );
   }
 
-  Widget _buildCreatedCardExpanded(Map<String, dynamic> data, String docId) {
-    String title = data['title'] ?? 'Exam';
-    String code = data['examCode'] ?? '-';
-    DateTime start = (data['startTime'] as Timestamp?)?.toDate() ?? DateTime.now();
-
-    String rawExamType = data['examType'] ?? data['type'] ?? 'Exam';
-    String formattedExamType = _formatExamType(rawExamType);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.only(bottom: 12),
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 20, offset: const Offset(0, 10)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                      child: const Text('HOSTED EXAM', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white24)
-                      ),
-                      child: Text(formattedExamType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: Colors.white70),
-                color: Colors.white,
-                onSelected: (value) async {
-                  if (value == 'delete') {
-                    // Permanently removes the exam from Firestore database
-                    await FirebaseFirestore.instance.collection('exams').doc(docId).delete();
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'delete', child: Text('Delete History', style: TextStyle(color: Colors.black))),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('Code: $code', style: const TextStyle(color: Colors.white70, fontSize: 14)),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_outlined, color: Colors.white70, size: 16),
-              const SizedBox(width: 8),
-              Text(_getBasicFormattedDate(start), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-            ],
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                final exam = Exam.fromJson(data, docId);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => ExamDashboardScreen(exam: exam)),
-                );
-              },
-              icon: const Icon(Icons.monitor, size: 20, color: Colors.black),
-              label: const Text('Open Exam Dashboard', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildCreatedCardCollapsed(Map<String, dynamic> data, String docId) {
     String title = data['title'] ?? 'Exam';
     DateTime start = (data['startTime'] as Timestamp?)?.toDate() ?? DateTime.now();
@@ -250,10 +134,18 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: Colors.black87),
             color: Colors.white,
-            onSelected: (value) async {
+            onSelected: (value) {
               if (value == 'delete') {
-                // Permanently removes the exam from Firestore database
-                await FirebaseFirestore.instance.collection('exams').doc(docId).delete();
+                ConfirmDialog.show(
+                  context: context,
+                  title: 'Delete History',
+                  message: 'Are you sure you want to delete this exam history? This action cannot be undone.',
+                  confirmText: 'Delete',
+                  isDestructive: true,
+                  onConfirm: () async {
+                    await FirebaseFirestore.instance.collection('exams').doc(docId).delete();
+                  },
+                );
               }
             },
             itemBuilder: (context) => [
@@ -270,11 +162,9 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     String lecturer = examData['lecturer'] ?? 'Lecturer';
     DateTime start = (examData['startTime'] as Timestamp?)?.toDate() ?? DateTime.now();
     int duration = examData['durationMinutes'] ?? 0;
-
     String rawExamType = examData['examType'] ?? examData['type'] ?? 'Exam';
     String formattedExamType = _formatExamType(rawExamType);
 
-    // Format time and date string manually to match the required monochrome layout
     final end = start.add(Duration(minutes: duration));
     final startTimeStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
     final endTimeStr = "${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}";
@@ -326,10 +216,18 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: Colors.white70),
                 color: Colors.white,
-                onSelected: (value) async {
+                onSelected: (value) {
                   if (value == 'delete') {
-                    // Removes the student's personal record of joining this exam
-                    await submissionDoc.reference.delete();
+                    ConfirmDialog.show(
+                      context: context,
+                      title: 'Delete History',
+                      message: 'Are you sure you want to delete this exam history? This action cannot be undone.',
+                      confirmText: 'Delete',
+                      isDestructive: true,
+                      onConfirm: () async {
+                        await submissionDoc.reference.delete();
+                      },
+                    );
                   }
                 },
                 itemBuilder: (context) => [
@@ -397,10 +295,18 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: Colors.black87),
             color: Colors.white,
-            onSelected: (value) async {
+            onSelected: (value) {
               if (value == 'delete') {
-                // Removes the student's personal record of joining this exam
-                await submissionDoc.reference.delete();
+                ConfirmDialog.show(
+                  context: context,
+                  title: 'Delete History',
+                  message: 'Are you sure you want to delete this exam history? This action cannot be undone.',
+                  confirmText: 'Delete',
+                  isDestructive: true,
+                  onConfirm: () async {
+                    await submissionDoc.reference.delete();
+                  },
+                );
               }
             },
             itemBuilder: (context) => [
@@ -445,8 +351,6 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
         }
 
         final allDocs = snapshot.data?.docs ?? [];
-
-        // Filters out active exams, displaying only past or deactivated records
         final hostedDocs = allDocs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           if (data['hostId'] != _currentUid) return false;
@@ -478,7 +382,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           slivers: [
             if (hostedDocs.isEmpty)
               const SliverFillRemaining(
-                child: Center(child: Text("No history yet.", style: TextStyle(color: Colors.black54))),
+                child: EmptyState(message: 'No created exam history yet.'),
               ),
             if (hostedDocs.isNotEmpty)
               SliverPadding(
@@ -487,18 +391,37 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final data = hostedDocs[index].data() as Map<String, dynamic>;
                     final docId = hostedDocs[index].id;
+                    final exam = Exam.fromJson(data, docId);
+                    final formattedExamType = _formatExamType(data['examType'] ?? data['type'] ?? 'Exam');
+
+                    Widget expandedCard = ExamCard(
+                      exam: exam,
+                      formattedExamType: formattedExamType,
+                      isActive: false, 
+                      onOpenDashboard: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => ExamDashboardScreen(exam: exam)));
+                      },
+                      onDelete: () {
+                        ConfirmDialog.show(
+                          context: context,
+                          title: 'Delete Exam',
+                          message: 'Are you sure you want to delete this exam session? This action cannot be undone.',
+                          confirmText: 'Delete',
+                          isDestructive: true,
+                          onConfirm: () async {
+                            await FirebaseFirestore.instance.collection('exams').doc(exam.id).delete();
+                          },
+                        );
+                      },
+                    );
 
                     if (index == 0) {
                       bool isExpanded = _expandedCreatedId == null || _expandedCreatedId == docId;
                       return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _expandedCreatedId = isExpanded ? null : docId;
-                          });
-                        },
+                        onTap: () => setState(() => _expandedCreatedId = isExpanded ? null : docId),
                         child: AnimatedCrossFade(
                           duration: const Duration(milliseconds: 300),
-                          firstChild: _buildCreatedCardExpanded(data, docId),
+                          firstChild: expandedCard,
                           secondChild: _buildCreatedCardCollapsed(data, docId),
                           crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
                         ),
@@ -506,16 +429,12 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                     } else {
                       bool isExpanded = _expandedCreatedId == docId;
                       return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _expandedCreatedId = isExpanded ? null : docId;
-                          });
-                        },
+                        onTap: () => setState(() => _expandedCreatedId = isExpanded ? null : docId),
                         child: AnimatedCrossFade(
                           duration: const Duration(milliseconds: 300),
                           crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
                           firstChild: _buildCreatedCardCollapsed(data, docId),
-                          secondChild: _buildCreatedCardExpanded(data, docId),
+                          secondChild: expandedCard,
                         ),
                       );
                     }
@@ -547,12 +466,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
         });
 
         if (submissionDocs.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32),
-              child: Text("No history yet.", textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, height: 1.5)),
-            ),
-          );
+          return const EmptyState(message: 'No joined exam history yet.');
         }
 
         return ListView.builder(
@@ -561,17 +475,12 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           itemBuilder: (context, index) {
             final submissionDoc = submissionDocs[index];
             final docId = submissionDoc.id;
-
             final examData = submissionDoc.data() as Map<String, dynamic>;
 
             if (index == 0) {
               bool isExpanded = _expandedJoinedId == null || _expandedJoinedId == docId;
               return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _expandedJoinedId = isExpanded ? null : docId;
-                  });
-                },
+                onTap: () => setState(() => _expandedJoinedId = isExpanded ? null : docId),
                 child: AnimatedCrossFade(
                   duration: const Duration(milliseconds: 400),
                   firstChild: _buildJoinedCardExpanded(submissionDoc, examData),
@@ -582,11 +491,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
             } else {
               bool isExpanded = _expandedJoinedId == docId;
               return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _expandedJoinedId = isExpanded ? null : docId;
-                  });
-                },
+                onTap: () => setState(() => _expandedJoinedId = isExpanded ? null : docId),
                 child: AnimatedCrossFade(
                   duration: const Duration(milliseconds: 300),
                   crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,

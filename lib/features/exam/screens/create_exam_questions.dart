@@ -6,10 +6,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../../theme/app_theme.dart';
-import '../../widgets/primary_button.dart';
-import '../../models/exam.dart';
-import '../../services/exam_service.dart';
+// REFACTORED IMPORTS
+import 'package:classguard/core/theme/app_theme.dart';
+import 'package:classguard/models/exam.dart';
+import 'package:classguard/features/exam/services/exam_service.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
 
 class CreateExamQuestionsScreen extends StatefulWidget {
   final String examTitle;
@@ -42,7 +43,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
   final List<Question> _questions = [];
   bool _isLoading = false;
 
-  // Generates a unique 4-character alphanumeric code appended to "EXM-" for room joining
   String _generateExamCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     Random rnd = Random();
@@ -50,7 +50,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
     return 'EXM-$randomPart';
   }
 
-  // Parses a selected CSV file to automatically populate the question list
   Future<void> _importFromCSV() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
@@ -65,7 +64,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
 
         if (rowsAsListOfValues.isEmpty) throw Exception("The selected CSV file is empty.");
 
-        // Automatically detect and skip the header row if it contains 'question' or 'soal'
         int startIndex = 0;
         if (rowsAsListOfValues[0][0].toString().toLowerCase().contains('question') || rowsAsListOfValues[0][0].toString().toLowerCase().contains('soal')) {
           startIndex = 1;
@@ -80,7 +78,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
               addedCount++;
             }
           } else {
-            // Require at least 6 columns for Multiple Choice: Question, Opt A, Opt B, Opt C, Opt D, Correct Index
             if (row.length >= 6) {
               _questions.add(Question(id: '', questionText: row[0].toString().trim(), options: [row[1].toString().trim(), row[2].toString().trim(), row[3].toString().trim(), row[4].toString().trim()], correctIndex: int.tryParse(row[5].toString()) ?? 0, order: _questions.length + 1));
               addedCount++;
@@ -97,7 +94,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
     }
   }
 
-  // Compiles the exam data and delegates database insertion to ExamService
   Future<void> _saveAndPublishExam() async {
     if (_questions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please add at least one question.')));
@@ -118,7 +114,6 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
 
       await _examService.createExamSession(newExam, _questions, widget.examType);
 
-      // Save ownership record locally for immediate UI recognition
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('host_exam_$generatedCode', hostId);
 
@@ -152,6 +147,7 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
               const SizedBox(height: 24),
               Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 24), decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(16)), child: Text(code, textAlign: TextAlign.center, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4, color: Colors.black))),
               const SizedBox(height: 24),
+              // REUSABLE WIDGET: PrimaryButton
               PrimaryButton(text: 'Done', onPressed: () { Navigator.pop(context); Navigator.pop(context); Navigator.pop(context); }),
             ],
           ),
@@ -216,6 +212,7 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
                       ],
 
                       const SizedBox(height: 32),
+                      // REUSABLE WIDGET: PrimaryButton
                       PrimaryButton(
                         text: 'Save Question',
                         onPressed: () {
@@ -315,6 +312,7 @@ class _CreateExamQuestionsScreenState extends State<CreateExamQuestionsScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                // REUSABLE WIDGET: PrimaryButton
                 PrimaryButton(text: 'Save & Publish Exam', isLoading: _isLoading, onPressed: _saveAndPublishExam),
               ],
             ),

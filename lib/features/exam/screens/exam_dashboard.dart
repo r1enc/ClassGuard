@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:csv/csv.dart';
-// IMPORT FILE PICKER TO HANDLE SCOPED STORAGE SAFELY
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
-import '../../models/exam.dart';
-import '../../shared/widgets/primary_button.dart';
-import '../../shared/feedback/empty_state.dart';
+
+// REFACTORED IMPORTS
+import 'package:classguard/models/exam.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
+import 'package:classguard/shared/feedback/empty_state.dart';
 
 class ExamDashboardScreen extends StatefulWidget {
   final Exam exam;
@@ -57,7 +58,6 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
     }
   }
 
-  // EXPORT FEATURE: Generate CSV and use FilePicker to save safely on modern Android
   Future<void> _exportGradingToCSV(List<QueryDocumentSnapshot> studentDocs) async {
     List<List<dynamic>> rows = [];
     rows.add(["Student Name", "Score", "Status", "Joined At", "Submitted At"]);
@@ -76,31 +76,19 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
     String csvData = const ListToCsvConverter().convert(rows);
 
     try {
-      // Convert string to bytes — required for Android & iOS file operations
       final Uint8List bytes = Uint8List.fromList(csvData.codeUnits);
-
       String? outputFile = await FilePicker.platform.saveFile(
         dialogTitle: 'Save Exam Scores',
         fileName: 'Exam_Scores_${widget.exam.examCode}.csv',
         type: FileType.custom,
         allowedExtensions: ['csv'],
-        // Required parameter for saving files on modern Android via FilePicker
         bytes: bytes,
       );
 
       if (outputFile == null) return;
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Scores Exported Successfully!'), backgroundColor: Colors.green)
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Scores Exported Successfully!'), backgroundColor: Colors.green));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to export: $e'), backgroundColor: Colors.red)
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to export: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -133,8 +121,8 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
               children: [
                 const Text('Students Joined', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 24),
-                studentDocs.isEmpty 
-                    ? const EmptyState(message: 'No students joined yet.')
+                // REUSABLE WIDGET: EmptyState
+                studentDocs.isEmpty ? const EmptyState(message: 'No students joined yet.')
                     : ConstrainedBox(
                   constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
                   child: ListView.builder(
@@ -182,6 +170,7 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
               children: [
                 const Text('Grading Reports', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 24),
+                // REUSABLE WIDGET: EmptyState
                 studentDocs.isEmpty
                     ? const EmptyState(message: 'No grading reports available.')
                     : ConstrainedBox(
@@ -204,7 +193,6 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
                     },
                   ),
                 ),
-
                 if (studentDocs.isNotEmpty && _examType != 'essay') ...[
                   const SizedBox(height: 24),
                   PrimaryButton(
@@ -318,6 +306,7 @@ class _ExamDashboardScreenState extends State<ExamDashboardScreen> {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
+                  // REUSABLE WIDGET: PrimaryButton
                   child: widget.exam.isActive
                       ? PrimaryButton(text: 'End Session', isLoading: _isLoading, onPressed: _endExamSession)
                       : Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16), alignment: Alignment.center, decoration: BoxDecoration(color: const Color(0xFFEEEEEE), borderRadius: BorderRadius.circular(12)), child: const Text('Session Ended', style: TextStyle(color: Colors.black38, fontWeight: FontWeight.bold, fontSize: 16))),

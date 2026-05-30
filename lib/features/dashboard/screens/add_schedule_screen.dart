@@ -3,8 +3,12 @@ import 'package:classguard/core/routes/app_routes.dart';
 import 'package:classguard/features/classroom/screens/select_apps_screen.dart';
 import 'package:classguard/core/services/firestore_service.dart';
 import 'package:classguard/core/theme/app_theme.dart';
+
+// UI KIT IMPORTS
+import 'package:classguard/shared/widgets/day_selector.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:classguard/shared/widgets/setting_card.dart';
+
 import 'package:flutter/material.dart';
 
 class AddScheduleScreen extends StatefulWidget {
@@ -27,14 +31,13 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
   String selectedDay = "Mon";
   bool isAppLockEnabled = true;
   bool isSilentModeEnabled = true;
-  final List<String> days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-  List<String> blockedPackages = [];
   bool isLoading = false; 
-// Restore existing schedule data when editing a schedule.
+  List<String> blockedPackages = [];
+
   @override
   void initState() {
     super.initState();
+    // STATE MANAGEMENT: Pre-fill fields if we are editing an existing schedule
     if (widget.courseToEdit != null) {
       subjectController.text = widget.courseToEdit!.subject;
       lecturerController.text = widget.courseToEdit!.lecturer;
@@ -81,44 +84,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
           children: [
             const Text('Day', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: days
-                  .map(
-                    (day) => GestureDetector(
-                  onTap: () => setState(() => selectedDay = day),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: selectedDay == day
-                          ? AppTheme.primaryColor
-                          : AppTheme.backgroundColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black26),
-                    ),
-                    child: Center(
-                      child: Text(
-                        day,
-                        style: TextStyle(
-                          color: selectedDay == day
-                              ? Colors.white
-                              : AppTheme.textDark,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              )
-                  .toList(),
+            DaySelector(
+              selectedDay: selectedDay,
+              onDaySelected: (day) => setState(() => selectedDay = day),
             ),
             const SizedBox(height: 24),
 
             const Text('Course', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-           
             TextField(
               controller: subjectController,
               decoration: AppTheme.baseInputDecoration("e.g., Web Programming"),
@@ -193,105 +166,70 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
             ),
             const SizedBox(height: 24),
 
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.cardBackground,
-                borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                border: Border.all(color: AppTheme.borderColor, width: 1.0),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.iconBackground,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.block, color: AppTheme.textDark),
-                      ),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'App Lock',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                            Text(
-                              'Block distracting apps during schedule',
-                              style: TextStyle(fontSize: 12, color: AppTheme.textLight),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: isAppLockEnabled,
-                        activeColor: Colors.white,
-                        activeTrackColor: AppTheme.primaryColor,
-                        onChanged: (val) => setState(() => isAppLockEnabled = val),
-                      ),
-                    ],
-                  ),
-                  if (isAppLockEnabled) ...[
-                    const Divider(height: 32),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        "Blocked Apps List:",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.apps, color: AppTheme.textLight),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              "${blockedPackages.length} Apps Selected",
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          ElevatedButton(
-                            onPressed: () async {
-                              FocusScope.of(context).unfocus();
-                              final result = await Navigator.push(
-                                context,
-                                createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)),
-                              );
-                              if (result != null) {
-                                setState(() {
-                                  blockedPackages = List<String>.from(result);
-                                });
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryColor,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text("SELECT"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
+            SettingCard(
+              icon: Icons.block,
+              title: 'App Lock',
+              subtitle: 'Block distracting apps during schedule',
+              trailing: Switch(
+                value: isAppLockEnabled,
+                activeColor: Colors.white,
+                activeTrackColor: AppTheme.primaryColor,
+                onChanged: (val) => setState(() => isAppLockEnabled = val),
               ),
             ),
+            
+            if (isAppLockEnabled) ...[
+              const SizedBox(height: 12),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Blocked Apps List:",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.apps, color: AppTheme.textLight),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        "${blockedPackages.length} Apps Selected",
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        FocusScope.of(context).unfocus();
+                        final result = await Navigator.push(
+                          context,
+                          createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)),
+                        );
+                        if (result != null) {
+                          setState(() {
+                            blockedPackages = List<String>.from(result);
+                          });
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text("SELECT"),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
 
             SettingCard(
@@ -307,6 +245,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
             ),
             const SizedBox(height: 48),
 
+            // CORE LOGIC: Verify inputs and save the personal routine to Firestore
             PrimaryButton(
               text: widget.courseToEdit != null ? 'Update Schedule' : 'Save Schedule',
               isLoading: isLoading,
@@ -329,7 +268,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 }
 
                 setState(() => isLoading = true);
-                // Prevent overlapping schedules before saving personal focus sessions.
+                
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,

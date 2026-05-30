@@ -1,34 +1,38 @@
 import 'dart:async';
-
-import 'package:classguard/core/background/alarm_service.dart';
-import 'package:classguard/models/course.dart';
-import 'package:classguard/models/exam.dart';
-import 'package:classguard/features/dashboard/screens/add_schedule_screen.dart';
-import 'package:classguard/features/dashboard/screens/settings_screen.dart';
-import 'package:classguard/features/dashboard/screens/teacher_dashboard_screen.dart';
-import 'package:classguard/features/onboarding/screens/permission_onboarding_screen.dart';
-import 'package:classguard/features/classroom/screens/create_room_screen.dart';
-import 'package:classguard/features/classroom/screens/join_room_screen.dart';
-import 'package:classguard/features/exam/screens/create_exam.dart';
-import 'package:classguard/features/exam/screens/exam_session.dart';
-import 'package:classguard/features/exam/screens/exam_dashboard.dart';
-import 'package:classguard/features/exam/screens/exam_history.dart';
-import 'package:classguard/features/auth/services/auth_service.dart';
-import 'package:classguard/core/services/firestore_service.dart';
-import 'package:classguard/core/utils/time_utils.dart';
-import 'package:classguard/shared/feedback/empty_state.dart';
-import 'package:classguard/shared/feedback/status_badge.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
+
+import 'package:classguard/core/background/alarm_service.dart';
+import 'package:classguard/core/services/firestore_service.dart';
+import 'package:classguard/core/utils/time_utils.dart';
+import 'package:classguard/models/course.dart';
+import 'package:classguard/models/exam.dart';
+import 'package:classguard/features/auth/services/auth_service.dart';
+
+import 'package:classguard/features/dashboard/screens/add_schedule_screen.dart';
+import 'package:classguard/features/dashboard/screens/settings_screen.dart';
+import 'package:classguard/features/classroom/screens/create_room_screen.dart';
+import 'package:classguard/features/classroom/screens/join_room_screen.dart';
+import 'package:classguard/features/classroom/screens/teacher_dashboard_screen.dart';
+import 'package:classguard/features/onboarding/screens/permission_onboarding_screen.dart';
+import 'package:classguard/features/exam/screens/create_exam.dart';
+import 'package:classguard/features/exam/screens/exam_session.dart';
+import 'package:classguard/features/exam/screens/exam_dashboard.dart';
+import 'package:classguard/features/exam/screens/exam_history.dart';
+
+import 'package:classguard/shared/widgets/custom_bottom_sheet.dart';
+import 'package:classguard/shared/widgets/exam_card.dart';
+import 'package:classguard/shared/widgets/schedule_card.dart';
+import 'package:classguard/shared/feedback/empty_state.dart';
 
 class HomeScreen extends StatefulWidget {
   final String userName;
@@ -38,7 +42,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+// ADDED: WidgetsBindingObserver to detect when the app returns from the background
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription? _scheduleSubscription;
   late Stream<QuerySnapshot> _schedulesStream;
   String? _expandedCourseId;
@@ -57,13 +62,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Register the observer
+    WidgetsBinding.instance.addObserver(this);
+
     _alarmService = AlarmService(platform: platform);
     _loadProfileName();
 
     FlutterLocalNotificationsPlugin()
-        .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin
-    >()
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
 
     _schedulesStream = _firestoreService.schedulesStreamForCurrentUser();
@@ -76,7 +82,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _checkAndShowTutorialPopup();
-
       await Future.delayed(const Duration(seconds: 5));
       if (mounted && !_hasShownPermissionWarning) {
         _hasShownPermissionWarning = true;
@@ -95,6 +100,24 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    // Remove the observer to prevent memory leaks
+    WidgetsBinding.instance.removeObserver(this);
+    _scheduleSubscription?.cancel();
+    _minuteTimer?.cancel();
+    super.dispose();
+  }
+
+  // ADDED: Instantly trigger checks when user resumes the app to fix UI timer sleep
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkSchedulesState();
+      _checkExpiredExams();
+    }
+  }
+
   bool _isCourseCurrentlyRunning(Course course) {
     if (!course.isActive) return false;
     final now = DateTime.now();
@@ -111,7 +134,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _checkAndShowTutorialPopup() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool hasSeenTutorial = prefs.getBool('hasSeenTutorial') ?? false;
-
     if (!hasSeenTutorial && mounted) {
       _showTutorialDialog(prefs);
     }
@@ -124,7 +146,6 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) {
           int currentIndex = 0;
           final PageController pageController = PageController();
-
           return StatefulBuilder(builder: (context, setState) {
             return Dialog(
               backgroundColor: Colors.transparent,
@@ -132,18 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 width: double.infinity,
                 height: 460,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 30,
-                      spreadRadius: 5,
-                      offset: const Offset(0, 15),
-                    )
-                  ],
-                ),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 30, spreadRadius: 5, offset: const Offset(0, 15))]),
                 child: Column(
                   children: [
                     Expanded(
@@ -151,43 +161,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         controller: pageController,
                         onPageChanged: (index) => setState(() => currentIndex = index),
                         children: [
-                          _buildTutorialSlide(
-                            icon: Icons.calendar_month_outlined,
-                            title: 'Personal Schedule',
-                            description: 'Manage your daily routines. Set specific study hours to automatically silence your phone and block distracting apps.',
-                          ),
-                          _buildTutorialSlide(
-                            icon: Icons.domain_outlined,
-                            title: 'Classroom',
-                            description: 'Host or join virtual classes. When a class is active, it enforces focus mode and app restrictions synchronously for all students.',
-                          ),
-                          _buildTutorialSlide(
-                            icon: Icons.shield_outlined,
-                            title: 'Exam Mode',
-                            description: 'Enter a secure testing environment. The app locks your screen to prevent cheating during the exam session.',
-                          ),
+                          _buildTutorialSlide(icon: Icons.calendar_month_outlined, title: 'Personal Schedule', description: 'Manage your daily routines. Set specific study hours to automatically silence your phone and block distracting apps.'),
+                          _buildTutorialSlide(icon: Icons.domain_outlined, title: 'Classroom', description: 'Host or join virtual classes. When a class is active, it enforces focus mode and app restrictions synchronously for all students.'),
+                          _buildTutorialSlide(icon: Icons.shield_outlined, title: 'Exam Mode', description: 'Enter a secure testing environment. The app locks your screen to prevent cheating during the exam session.'),
                         ],
                       ),
                     ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(3, (index) => AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: currentIndex == index ? 24 : 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: currentIndex == index ? Colors.black : Colors.black26,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      )),
-                    ),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(3, (index) => AnimatedContainer(duration: const Duration(milliseconds: 300), margin: const EdgeInsets.symmetric(horizontal: 4), width: currentIndex == index ? 24 : 8, height: 8, decoration: BoxDecoration(color: currentIndex == index ? Colors.black : Colors.black26, borderRadius: BorderRadius.circular(4))))),
                     const SizedBox(height: 24),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                       child: SizedBox(
-                        width: double.infinity,
-                        height: 48,
+                        width: double.infinity, height: 48,
                         child: ElevatedButton(
                           onPressed: () {
                             if (currentIndex < 2) {
@@ -197,14 +182,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               Navigator.pop(context);
                             }
                           },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.black,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Text(
-                              currentIndex < 2 ? 'Next' : 'Get Started',
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)
-                          ),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                          child: Text(currentIndex < 2 ? 'Next' : 'Get Started', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                         ),
                       ),
                     ),
@@ -223,22 +202,11 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF5F5F5),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 64, color: Colors.black87),
-          ),
+          Container(padding: const EdgeInsets.all(24), decoration: const BoxDecoration(color: Color(0xFFF5F5F5), shape: BoxShape.circle), child: Icon(icon, size: 64, color: Colors.black87)),
           const SizedBox(height: 32),
           Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black)),
           const SizedBox(height: 16),
-          Text(
-              description,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.5)
-          ),
+          Text(description, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.5)),
         ],
       ),
     );
@@ -279,13 +247,17 @@ class _HomeScreenState extends State<HomeScreen> {
         int end = timeToMinutes(data['endTime'] ?? "00:00");
 
         if (currentMins >= start && currentMins < end) {
-          if (data['role'] == 'Teacher' && data['userId'] == uid) continue;
+          // CORE LOGIC UPDATE: Determine if user is Host to apply logic conditionally
+          bool isHost = (data['role'] == 'Teacher' && data['userId'] == uid);
 
-          bool wasActive = prefs.getBool('isAppLockActive') ?? false;
-          if (!wasActive) {
+          // This prevents the system from spamming notifications and silent mode for the Host
+          bool wasSessionActive = prefs.getBool('isClassSessionActive') ?? false;
+
+          if (!wasSessionActive) {
             double currentVol = await VolumeController().getVolume();
             await prefs.setDouble('prevVolume', currentVol);
 
+            // Silent mode executes for EVERYONE, including Host
             if (data['isSilentModeEnabled'] == true) {
               try {
                 await SoundMode.setSoundMode(RingerModeStatus.silent);
@@ -295,14 +267,52 @@ class _HomeScreenState extends State<HomeScreen> {
                 debugPrint("Silent mode error: $e");
               }
             }
-            Fluttertoast.showToast(msg: "Class started: Device is Silent & Distracting Apps Locked", toastLength: Toast.LENGTH_LONG);
+
+            // MONOCHROME UI: Start Session
+            Fluttertoast.showToast(
+              msg: isHost ? "Class started: Device is Silent" : "Class started: Device is Silent & Apps Locked",
+              toastLength: Toast.LENGTH_LONG,
+              backgroundColor: Colors.white,
+              textColor: Colors.black,
+            );
+
+            // Mark session as active so it only triggers once
+            await prefs.setBool('isClassSessionActive', true);
           }
 
-          List<dynamic> apps = data['blockedApps'] ?? [];
-          await prefs.setString('blockedApps', apps.join(','));
-          await prefs.setInt('allowanceTime', data['allowanceTime'] ?? 2);
-          await prefs.setString('securityPIN', data['securityPIN'] ?? "1234");
-          await prefs.setBool('isAppLockActive', data['isAppLockEnabled'] ?? true);
+          // AppLock only executes for Students. Host is exempted.
+          if (!isHost) {
+            List<dynamic> rawApps = data['blockedApps'] ?? [];
+            List<String> finalBlockedApps = rawApps.map((e) => e.toString()).toList();
+
+            // CORE LOGIC: VIP Access processing
+            // Safely handle Map structures from Firestore using the correct keys
+            if (data.containsKey('vipAccess')) {
+              var vipData = data['vipAccess'];
+
+              if (vipData is Map && vipData.containsKey(uid)) {
+                var myVip = vipData[uid];
+
+                int unlockMillis = myVip['until'] ?? 0;
+                String selectedApp = myVip['app'] ?? '';
+
+                if (DateTime.now().millisecondsSinceEpoch < unlockMillis) {
+                  if (selectedApp == 'all') {
+                    finalBlockedApps.clear();
+                  } else {
+                    finalBlockedApps.remove(selectedApp);
+                  }
+                }
+              }
+            }
+
+            await prefs.setString('blockedApps', finalBlockedApps.join(','));
+            await prefs.setInt('allowanceTime', data['allowanceTime'] ?? 2);
+            await prefs.setString('securityPIN', data['securityPIN'] ?? "1234");
+            await prefs.setBool('isAppLockActive', data['isAppLockEnabled'] ?? true);
+          } else {
+            await prefs.setBool('isAppLockActive', false);
+          }
 
           foundActive = true;
           break;
@@ -311,8 +321,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (!foundActive) {
-      bool wasActive = prefs.getBool('isAppLockActive') ?? false;
-      if (wasActive) {
+      bool wasSessionActive = prefs.getBool('isClassSessionActive') ?? false;
+      if (wasSessionActive) {
         double prevVol = prefs.getDouble('prevVolume') ?? 0.5;
         try {
           await SoundMode.setSoundMode(RingerModeStatus.normal);
@@ -321,17 +331,23 @@ class _HomeScreenState extends State<HomeScreen> {
         } catch (e) {
           debugPrint("Normal mode error: $e");
         }
-        Fluttertoast.showToast(msg: "Class ended: Device is back to normal", toastLength: Toast.LENGTH_LONG);
+
+        // MONOCHROME UI: End Session
+        Fluttertoast.showToast(
+          msg: "Class ended: Device is back to normal",
+          toastLength: Toast.LENGTH_LONG,
+          backgroundColor: Colors.white,
+          textColor: Colors.black,
+        );
       }
+      await prefs.setBool('isClassSessionActive', false);
       await prefs.setBool('isAppLockActive', false);
     }
   }
 
   Future<void> _loadProfileName() async {
     final profileName = await _authService.loadProfileName(fallbackName: widget.userName);
-    setState(() {
-      _displayName = profileName;
-    });
+    setState(() => _displayName = profileName);
   }
 
   Future<void> _checkAndShowPermissionWarning() async {
@@ -368,49 +384,22 @@ class _HomeScreenState extends State<HomeScreen> {
           child: AlertDialog(
             backgroundColor: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
-                SizedBox(width: 8),
-                Text('Action Required', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              ],
-            ),
+            title: const Row(children: [Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28), SizedBox(width: 8), Text('Action Required', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))]),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'ClassGuard detected that some core system permissions are disabled. Please re-enable the following permissions to keep the protection active:',
-                  style: TextStyle(fontSize: 14, color: Colors.black87),
-                ),
+                const Text('ClassGuard detected that some core system permissions are disabled. Please re-enable the following permissions to keep the protection active:', style: TextStyle(fontSize: 14, color: Colors.black87)),
                 const SizedBox(height: 16),
-                ...missingPermissions.map((p) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.close, color: Colors.red, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(p, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                    ],
-                  ),
-                )),
+                ...missingPermissions.map((p) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Icon(Icons.close, color: Colors.red, size: 18), const SizedBox(width: 8), Expanded(child: Text(p, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)))]))),
               ],
             ),
             actions: [
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => const PermissionOnboardingScreen(isFromSettings: true)));
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
+                  onPressed: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const PermissionOnboardingScreen(isFromSettings: true))); },
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 12)),
                   child: const Text('Enable Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
@@ -419,13 +408,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-  }
-
-  @override
-  void dispose() {
-    _scheduleSubscription?.cancel();
-    _minuteTimer?.cancel();
-    super.dispose();
   }
 
   String _getFormattedDate() {
@@ -439,285 +421,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (rawType.toLowerCase().contains('multiple')) return 'Multiple Choice';
     if (rawType.toLowerCase().contains('essay')) return 'Essay';
     return rawType;
-  }
-
-  Widget _buildActiveExamCard(Exam exam, String examType) {
-    final days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-    final String dayStr = days[exam.startTime.weekday - 1];
-
-    final String startStr = "${exam.startTime.hour.toString().padLeft(2, '0')}:${exam.startTime.minute.toString().padLeft(2, '0')}";
-    final String endStr = "${exam.endTime.hour.toString().padLeft(2, '0')}:${exam.endTime.minute.toString().padLeft(2, '0')}";
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.redAccent, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.redAccent.withValues(alpha: 0.25),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  StatusBadge.info('$dayStr • EXAM'),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: Text(
-                      examType.toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: Colors.white70),
-                color: Colors.black,
-                onSelected: (value) async {
-                  if (value == 'delete') {
-                    await FirebaseFirestore.instance.collection('exams').doc(exam.id).delete();
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.redAccent))),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            exam.title,
-            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            exam.creatorName,
-            style: const TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Icon(Icons.access_time, color: Colors.white70, size: 16),
-              const SizedBox(width: 8),
-              Text(
-                '$startStr - $endStr',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Code: ${exam.examCode}',
-            style: const TextStyle(color: Colors.white54, fontSize: 13, letterSpacing: 1),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ExamDashboardScreen(exam: exam))),
-              icon: const Icon(Icons.monitor, size: 20, color: Colors.black),
-              label: const Text('Open Exam Dashboard', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExpandedCard(Course course) {
-    bool isRunning = _isCourseCurrentlyRunning(course);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.only(bottom: 12),
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(24),
-        border: isRunning ? Border.all(color: Colors.greenAccent, width: 2) : null,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              isRunning
-                  ? StatusBadge.active()
-                  : StatusBadge.info('${course.day.toUpperCase()} • ${course.role.toUpperCase()}'),
-              const Spacer(),
-              Row(
-                children: [
-                  GestureDetector(
-                    onTap: () {
-                      if (isRunning) {
-                        Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red);
-                        return;
-                      }
-                      if (!course.isOwner) {
-                        Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87);
-                        return;
-                      }
-                      setState(() {
-                        course.isSilentModeEnabled = !course.isSilentModeEnabled;
-                      });
-                      _firestoreService.updateScheduleSilentMode(course.id, course.isSilentModeEnabled);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Icon(
-                        course.isSilentModeEnabled ? Icons.volume_off : Icons.volume_up,
-                        color: course.isSilentModeEnabled ? Colors.white : Colors.white38,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      if (isRunning) {
-                        Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red);
-                        return;
-                      }
-                      if (!course.isOwner) {
-                        Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87);
-                        return;
-                      }
-                      setState(() {
-                        course.isAppLockEnabled = !course.isAppLockEnabled;
-                      });
-                      _firestoreService.updateScheduleAppLock(course.id, course.isAppLockEnabled);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Icon(
-                        course.isAppLockEnabled ? Icons.lock_outline : Icons.lock_open_outlined,
-                        color: course.isAppLockEnabled ? Colors.white : Colors.white38,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  PopupMenuButton<String>(
-                    icon: Icon(
-                      Icons.more_vert,
-                      color: (isRunning && !course.isOwner) ? Colors.white24 : Colors.white70,
-                    ),
-                    color: Colors.black,
-                    itemBuilder: (context) => [
-                      if (course.isOwner && (!isRunning || course.role == 'Teacher'))
-                        const PopupMenuItem(value: 'edit', child: Text('Edit', style: TextStyle(color: Colors.white))),
-                      if (!isRunning)
-                        PopupMenuItem(value: 'delete', child: Text(course.isOwner ? 'Delete' : 'Leave Classroom', style: const TextStyle(color: Colors.redAccent))),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(course.subject, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('${course.lecturer} • ${course.room}', style: const TextStyle(color: Colors.white70, fontSize: 14)),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.access_time, color: Colors.white70, size: 16),
-                  const SizedBox(width: 8),
-                  Text('${course.startTime} - ${course.endTime}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-                ],
-              ),
-              Switch(
-                value: course.isActive,
-                activeThumbColor: Colors.black,
-                activeTrackColor: Colors.white,
-                inactiveTrackColor: Colors.white24,
-                onChanged: (val) async {
-                  if (isRunning && val == false) {
-                    Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red);
-                    return;
-                  }
-                  if (!course.isOwner) {
-                    Fluttertoast.showToast(msg: "Only the teacher can toggle this room.", backgroundColor: Colors.red);
-                    return;
-                  }
-                  if (val == true) {
-                    String? error = await _firestoreService.checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
-                    if (error != null) {
-                      if (error == "OVERRIDDEN") {
-                        Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
-                      } else {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-                        return;
-                      }
-                    }
-                  }
-                  setState(() {
-                    course.isActive = val;
-                  });
-                  _firestoreService.updateScheduleActive(course.id, val);
-                },
-              ),
-            ],
-          ),
-          if (course.role == 'Teacher' && course.isOwner) ...[
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => TeacherDashboardScreen(course: course))),
-                icon: const Icon(Icons.admin_panel_settings, size: 20, color: Colors.black),
-                label: const Text('Open Classroom Dashboard', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 
   Widget _buildCollapsedLightCard(Course course) {
@@ -746,18 +449,11 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  course.subject,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: course.isActive ? Colors.black87 : Colors.black38),
-                ),
+                Text(course.subject, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: course.isActive ? Colors.black87 : Colors.black38)),
                 const SizedBox(height: 4),
                 Text(
                   isRunning ? 'ACTIVE NOW' : '${course.day} • ${course.startTime} - ${course.endTime}',
-                  style: TextStyle(
-                    color: isRunning ? Colors.green : (course.isActive ? Colors.black54 : Colors.black26),
-                    fontSize: 14,
-                    fontWeight: isRunning ? FontWeight.bold : FontWeight.normal,
-                  ),
+                  style: TextStyle(color: isRunning ? Colors.green : (course.isActive ? Colors.black54 : Colors.black26), fontSize: 14, fontWeight: isRunning ? FontWeight.bold : FontWeight.normal),
                 ),
               ],
             ),
@@ -767,98 +463,40 @@ class _HomeScreenState extends State<HomeScreen> {
             activeThumbColor: Colors.white,
             activeTrackColor: Colors.black87,
             onChanged: (val) async {
-              if (isRunning && val == false) {
-                Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red);
-                return;
-              }
-              if (!course.isOwner) {
-                Fluttertoast.showToast(msg: "Only the teacher can toggle this.", backgroundColor: Colors.black87);
-                return;
-              }
+              if (isRunning && val == false) { Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red); return; }
+              if (!course.isOwner) { Fluttertoast.showToast(msg: "Only the teacher can toggle this.", backgroundColor: Colors.black87); return; }
               if (val == true) {
                 String? error = await _firestoreService.checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
                 if (error != null) {
-                  if (error == "OVERRIDDEN") {
-                    Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
-                  } else {
+                  if (error == "OVERRIDDEN") { Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled."); } else {
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
                     return;
                   }
                 }
               }
-              setState(() {
-                course.isActive = val;
-              });
+              setState(() => course.isActive = val);
               _firestoreService.updateScheduleActive(course.id, val);
             },
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert_rounded, color: (isRunning && !course.isOwner) ? Colors.black26 : Colors.black87),
             color: Colors.white,
-            onSelected: (value) async {
-              if (isRunning && !course.isOwner) {
-                Fluttertoast.showToast(msg: "Class is running. Action blocked.", backgroundColor: Colors.red);
-                return;
-              }
+            onSelected: (value) {
+              if (isRunning && !course.isOwner) { Fluttertoast.showToast(msg: "Class is running. Action blocked.", backgroundColor: Colors.red); return; }
               if (value == 'edit') {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => AddScheduleScreen(courseToEdit: course)));
               } else if (value == 'delete') {
-                if (isRunning) {
-                  Fluttertoast.showToast(msg: "Class is running. Cannot delete.", backgroundColor: Colors.red);
-                  return;
-                }
-                if (course.isOwner) {
-                  _firestoreService.deleteSchedule(course.id);
-                } else {
-                  _firestoreService.leaveSchedule(course.id);
-                }
+                if (isRunning) { Fluttertoast.showToast(msg: "Class is running. Cannot delete.", backgroundColor: Colors.red); return; }
+                if (course.isOwner) { _firestoreService.deleteSchedule(course.id); } else { _firestoreService.leaveSchedule(course.id); }
               }
             },
             itemBuilder: (context) => [
-              if (course.isOwner && (!isRunning || course.role == 'Teacher'))
-                const PopupMenuItem(value: 'edit', child: Text('Edit', style: TextStyle(color: Colors.black))),
-              if (!isRunning)
-                PopupMenuItem(value: 'delete', child: Text(course.isOwner ? 'Delete' : 'Leave Classroom', style: const TextStyle(color: Colors.redAccent))),
+              if (course.isOwner && (!isRunning || course.role == 'Teacher')) const PopupMenuItem(value: 'edit', child: Text('Edit', style: TextStyle(color: Colors.black))),
+              if (!isRunning) PopupMenuItem(value: 'delete', child: Text(course.isOwner ? 'Delete' : 'Leave Classroom', style: const TextStyle(color: Colors.redAccent))),
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildBottomSheetItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: const BoxDecoration(color: Color(0xFFF5F5F5), shape: BoxShape.circle),
-              child: Icon(icon, color: Colors.black87, size: 22),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.black.withValues(alpha: 0.5))),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -948,27 +586,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         Row(
                           children: [
                             InkWell(
-                              onTap: () {
-                                Navigator.push(context, MaterialPageRoute(builder: (context) => const ExamHistoryScreen()));
-                              },
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ExamHistoryScreen())),
                               borderRadius: BorderRadius.circular(30),
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1.0)),
-                                child: const Icon(Icons.history, color: Colors.black87, size: 24),
-                              ),
+                              child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1.0)), child: const Icon(Icons.history, color: Colors.black87, size: 24)),
                             ),
                             const SizedBox(width: 12),
                             InkWell(
-                              onTap: () {
-                                Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())).then((_) => _loadProfileName());
-                              },
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen())).then((_) => _loadProfileName()),
                               borderRadius: BorderRadius.circular(30),
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1.0)),
-                                child: const Icon(Icons.settings_outlined, color: Colors.black87, size: 24),
-                              ),
+                              child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black.withValues(alpha: 0.05), width: 1.0)), child: const Icon(Icons.settings_outlined, color: Colors.black87, size: 24)),
                             ),
                           ],
                         )
@@ -984,13 +610,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               (context, index) {
                             final data = activeExams[index].data() as Map<String, dynamic>;
                             final exam = Exam.fromJson(data, activeExams[index].id);
-
-                            final rawExamType = data['examType'] ?? data['type'] ?? 'Exam';
-                            final formattedExamType = _formatExamType(rawExamType.toString());
+                            final formattedExamType = _formatExamType((data['examType'] ?? data['type'] ?? 'Exam').toString());
 
                             return Padding(
                               padding: const EdgeInsets.only(top: 16),
-                              child: _buildActiveExamCard(exam, formattedExamType),
+                              child: ExamCard(
+                                  exam: exam,
+                                  formattedExamType: formattedExamType,
+                                  onOpenDashboard: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ExamDashboardScreen(exam: exam))),
+                                  onDelete: () async {
+                                    await FirebaseFirestore.instance.collection('exams').doc(exam.id).delete();
+                                  }
+                              ),
                             );
                           },
                           childCount: activeExams.length,
@@ -1003,19 +634,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate((context, index) {
                         if (courseList.isEmpty) {
-                          return const EmptyState(
-                            message: 'No schedules yet. Tap + to add schedule or join a classroom.',
-                            isCard: true,
-                          );
+                          return const EmptyState(message: 'No schedules yet. Tap + to add schedule or join a classroom.', isCard: true);
                         }
 
                         if (isAnyExamActive) {
-                          if (index == 0) {
-                            return const Padding(
-                                padding: EdgeInsets.only(top: 16, bottom: 16),
-                                child: Text('Other Schedules', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87))
-                            );
-                          }
+                          if (index == 0) return const Padding(padding: EdgeInsets.only(top: 16, bottom: 16), child: Text('Other Schedules', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)));
                           Course course = courseList[index - 1];
                           bool isExpanded = _expandedCourseId == course.id;
                           return GestureDetector(
@@ -1024,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 duration: const Duration(milliseconds: 300),
                                 crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
                                 firstChild: _buildCollapsedLightCard(course),
-                                secondChild: _buildExpandedCard(course)
+                                secondChild: _buildReusableScheduleCard(course)
                             ),
                           );
                         } else {
@@ -1037,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onTap: () => setState(() => _expandedCourseId = isExpanded ? null : course.id),
                                 child: AnimatedCrossFade(
                                     duration: const Duration(milliseconds: 400),
-                                    firstChild: _buildExpandedCard(course),
+                                    firstChild: _buildReusableScheduleCard(course),
                                     secondChild: _buildCollapsedLightCard(course),
                                     crossFadeState: isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond
                                 ),
@@ -1058,7 +681,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 duration: const Duration(milliseconds: 300),
                                 crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
                                 firstChild: _buildCollapsedLightCard(course),
-                                secondChild: _buildExpandedCard(course)
+                                secondChild: _buildReusableScheduleCard(course)
                             ),
                           );
                         }
@@ -1074,54 +697,19 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          showModalBottomSheet(
+          CustomBottomSheet.show(
             context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.white,
-            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-            builder: (context) {
-              return SafeArea(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).padding.bottom + 24),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildBottomSheetItem(
-                          icon: Icons.date_range_outlined,
-                          title: 'Add Schedule', subtitle: 'Your personal routine',
-                          onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const AddScheduleScreen())); },
-                        ),
-                        const SizedBox(height: 8),
-                        _buildBottomSheetItem(
-                          icon: Icons.domain_add_outlined,
-                          title: 'Create Classroom', subtitle: 'As a Teacher',
-                          onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateRoomScreen())); },
-                        ),
-                        const SizedBox(height: 8),
-                        _buildBottomSheetItem(
-                          icon: Icons.login_outlined,
-                          title: 'Join Classroom', subtitle: 'As a Student',
-                          onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => JoinRoomScreen(userName: _displayName.isNotEmpty ? _displayName : widget.userName))); },
-                        ),
-                        const SizedBox(height: 8),
-                        _buildBottomSheetItem(
-                          icon: Icons.edit_document,
-                          title: 'Create Exam Room', subtitle: 'Host a strict exam session',
-                          onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateExamScreen())); },
-                        ),
-                        const SizedBox(height: 8),
-                        _buildBottomSheetItem(
-                          icon: Icons.login_outlined,
-                          title: 'Join Exam Room', subtitle: 'Enter an active exam session',
-                          onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ExamSessionScreen())); },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+            items: [
+              CustomBottomSheet.buildItem(icon: Icons.date_range_outlined, title: 'Add Schedule', subtitle: 'Your personal routine', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const AddScheduleScreen())); }),
+              const SizedBox(height: 8),
+              CustomBottomSheet.buildItem(icon: Icons.domain_add_outlined, title: 'Create Classroom', subtitle: 'As a Teacher', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateRoomScreen())); }),
+              const SizedBox(height: 8),
+              CustomBottomSheet.buildItem(icon: Icons.login_outlined, title: 'Join Classroom', subtitle: 'As a Student', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => JoinRoomScreen(userName: _displayName.isNotEmpty ? _displayName : widget.userName))); }),
+              const SizedBox(height: 8),
+              CustomBottomSheet.buildItem(icon: Icons.edit_document, title: 'Create Exam Room', subtitle: 'Host a strict exam session', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateExamScreen())); }),
+              const SizedBox(height: 8),
+              CustomBottomSheet.buildItem(icon: Icons.login_outlined, title: 'Join Exam Room', subtitle: 'Enter an active exam session', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ExamSessionScreen())); }),
+            ],
           );
         },
         backgroundColor: Colors.black,
@@ -1130,6 +718,48 @@ class _HomeScreenState extends State<HomeScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: const Icon(Icons.add_rounded),
       ),
+    );
+  }
+
+  Widget _buildReusableScheduleCard(Course course) {
+    bool isRunning = _isCourseCurrentlyRunning(course);
+    return ScheduleCard(
+      course: course,
+      isRunning: isRunning,
+      onToggleSilent: () {
+        if (isRunning) { Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red); return; }
+        if (!course.isOwner) { Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87); return; }
+        setState(() => course.isSilentModeEnabled = !course.isSilentModeEnabled);
+        _firestoreService.updateScheduleSilentMode(course.id, course.isSilentModeEnabled);
+      },
+      onToggleAppLock: () {
+        if (isRunning) { Fluttertoast.showToast(msg: "Class is running. Cannot change settings now.", backgroundColor: Colors.red); return; }
+        if (!course.isOwner) { Fluttertoast.showToast(msg: "Only the host can change this setting.", backgroundColor: Colors.black87); return; }
+        setState(() => course.isAppLockEnabled = !course.isAppLockEnabled);
+        _firestoreService.updateScheduleAppLock(course.id, course.isAppLockEnabled);
+      },
+      onEdit: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AddScheduleScreen(courseToEdit: course))),
+      onDelete: () {
+        if (isRunning) { Fluttertoast.showToast(msg: "Class is running. Cannot delete.", backgroundColor: Colors.red); return; }
+        if (course.isOwner) { _firestoreService.deleteSchedule(course.id); } else { _firestoreService.leaveSchedule(course.id); }
+      },
+      onToggleActive: () async {
+        if (isRunning && course.isActive == true) { Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red); return; }
+        if (!course.isOwner) { Fluttertoast.showToast(msg: "Only the teacher can toggle this room.", backgroundColor: Colors.red); return; }
+        bool newVal = !course.isActive;
+        if (newVal) {
+          String? error = await _firestoreService.checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
+          if (error != null) {
+            if (error == "OVERRIDDEN") { Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled."); } else {
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+              return;
+            }
+          }
+        }
+        setState(() => course.isActive = newVal);
+        _firestoreService.updateScheduleActive(course.id, newVal);
+      },
+      onOpenDashboard: course.role == 'Teacher' && course.isOwner ? () => Navigator.push(context, MaterialPageRoute(builder: (context) => TeacherDashboardScreen(course: course))) : null,
     );
   }
 }

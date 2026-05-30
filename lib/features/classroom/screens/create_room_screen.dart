@@ -2,8 +2,13 @@ import 'package:classguard/core/routes/app_routes.dart';
 import 'package:classguard/features/classroom/screens/select_apps_screen.dart';
 import 'package:classguard/core/services/firestore_service.dart';
 import 'package:classguard/core/theme/app_theme.dart';
+
+// UI KIT IMPORTS
+import 'package:classguard/shared/feedback/info_banner.dart';
+import 'package:classguard/shared/widgets/day_selector.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:classguard/shared/widgets/setting_card.dart';
+
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
@@ -15,6 +20,7 @@ class CreateRoomScreen extends StatefulWidget {
 }
 
 class _CreateRoomScreenState extends State<CreateRoomScreen> {
+  // STATE MANAGEMENT: Controllers for text inputs and state tracking
   final subjectController = TextEditingController();
   final lecturerController = TextEditingController();
   final roomController = TextEditingController();
@@ -28,7 +34,6 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   bool isAppLockEnabled = true;
   bool isSilentModeEnabled = true;
   bool isLoading = false; 
-  final List<String> days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   List<String> blockedPackages = [];
 
@@ -63,60 +68,16 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.black87, size: 20),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      "You are creating a classroom as a Teacher. A code will be generated for students.",
-                      style: TextStyle(color: Colors.black87, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
+            const InfoBanner(
+              message: "You are creating a classroom as a Teacher. A code will be generated for students.",
             ),
             const SizedBox(height: 24),
+            
             const Text('Day', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: days
-                  .map(
-                    (day) => GestureDetector(
-                  onTap: () => setState(() => selectedDay = day),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: selectedDay == day
-                          ? AppTheme.primaryColor
-                          : AppTheme.backgroundColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black26),
-                    ),
-                    child: Center(
-                      child: Text(
-                        day,
-                        style: TextStyle(
-                          color: selectedDay == day
-                              ? Colors.white
-                              : AppTheme.textDark,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              )
-                  .toList(),
+            DaySelector(
+              selectedDay: selectedDay,
+              onDaySelected: (day) => setState(() => selectedDay = day),
             ),
             const SizedBox(height: 24),
 
@@ -203,105 +164,70 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 24),
 
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.cardBackground,
-                borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                border: Border.all(color: AppTheme.borderColor, width: 1.0),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.iconBackground,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.block, color: AppTheme.textDark),
-                      ),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Enforce App Lock',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                            Text(
-                              'Lock students apps during this session',
-                              style: TextStyle(fontSize: 12, color: AppTheme.textLight),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: isAppLockEnabled,
-                        activeColor: Colors.white,
-                        activeTrackColor: AppTheme.primaryColor,
-                        onChanged: (val) => setState(() => isAppLockEnabled = val),
-                      ),
-                    ],
-                  ),
-                  if (isAppLockEnabled) ...[
-                    const Divider(height: 32),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        "Blocked Apps List:",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.apps, color: AppTheme.textLight),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              "${blockedPackages.length} Apps Selected",
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          ElevatedButton(
-                            onPressed: () async {
-                              FocusScope.of(context).unfocus();
-                              final result = await Navigator.push(
-                                context,
-                                createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)),
-                              );
-                              if (result != null) {
-                                setState(() {
-                                  blockedPackages = List<String>.from(result);
-                                });
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryColor,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text("SELECT"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
+            SettingCard(
+              icon: Icons.block,
+              title: 'Enforce App Lock',
+              subtitle: 'Lock students apps during this session',
+              trailing: Switch(
+                value: isAppLockEnabled,
+                activeColor: Colors.white,
+                activeTrackColor: AppTheme.primaryColor,
+                onChanged: (val) => setState(() => isAppLockEnabled = val),
               ),
             ),
+            
+            if (isAppLockEnabled) ...[
+              const SizedBox(height: 12),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Blocked Apps List:",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.apps, color: AppTheme.textLight),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        "${blockedPackages.length} Apps Selected",
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        FocusScope.of(context).unfocus();
+                        final result = await Navigator.push(
+                          context,
+                          createRoute(SelectAppsScreen(initialSelectedApps: blockedPackages)),
+                        );
+                        if (result != null) {
+                          setState(() {
+                            blockedPackages = List<String>.from(result);
+                          });
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text("SELECT"),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
 
             SettingCard(
@@ -317,6 +243,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 48),
 
+            // CORE LOGIC: Input validation and conflict checking before writing to Firestore
             PrimaryButton(
               text: 'Create Classroom',
               isLoading: isLoading,
@@ -338,7 +265,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 }
 
                 setState(() => isLoading = true);
-                // Prevent overlapping schedules before creating synchronized classroom sessions.
+                
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,
@@ -406,21 +333,12 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                             ],
                           ),
                           actions: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.primaryColor,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold)),
-                              ),
+                            PrimaryButton(
+                              text: 'Done',
+                              onPressed: () {
+                                Navigator.pop(context);
+                                Navigator.pop(context);
+                              },
                             ),
                           ],
                         );

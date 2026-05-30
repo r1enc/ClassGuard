@@ -11,6 +11,7 @@ import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
+
 // Display native Android notifications for focus session state changes.
 Future<void> showClassGuardNotification({
   required int id,
@@ -20,7 +21,7 @@ Future<void> showClassGuardNotification({
   final FlutterLocalNotificationsPlugin plugin = FlutterLocalNotificationsPlugin();
 
   final AndroidInitializationSettings androidInit =
-  AndroidInitializationSettings('@mipmap/launcher_icon');
+  const AndroidInitializationSettings('@mipmap/launcher_icon');
 
   final InitializationSettings initSettings = InitializationSettings(
     android: androidInit,
@@ -30,7 +31,7 @@ Future<void> showClassGuardNotification({
     settings: initSettings,
   );
 
-  final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+  final AndroidNotificationDetails androidDetails = const AndroidNotificationDetails(
     'classguard_channel',
     'ClassGuard Alerts',
     importance: Importance.max,
@@ -49,6 +50,7 @@ Future<void> showClassGuardNotification({
     notificationDetails: platformDetails,
   );
 }
+
 // Must remain top-level for Android background isolate execution.
 @pragma('vm:entry-point')
 // Activate silent mode and app lock when scheduled classroom session starts.
@@ -76,6 +78,7 @@ void startClassGuard() async {
     int currentAllowanceTime = 0;
     String currentPin = "1234";
     bool matched = false;
+    bool isHost = false;
 
     for (var doc in snapshot.docs) {
       final data = doc.data();
@@ -84,13 +87,15 @@ void startClassGuard() async {
         int end = timeToMinutes(data['endTime'] ?? "00:00");
 
         if (currentMins >= start && currentMins < end) {
+          // CORE LOGIC UPDATE: Determine if user is Host to conditionally apply AppLock
           if (data['role'] == 'Teacher' && data['userId'] == uid) {
-            continue;
+            isHost = true;
+          } else {
+            List blocked = data['blockedApps'] ?? [];
+            currentBlockedApps = blocked.join(",");
+            currentAllowanceTime = data['allowanceTime'] ?? 0;
+            currentPin = data['securityPIN'] ?? "1234";
           }
-          List blocked = data['blockedApps'] ?? [];
-          currentBlockedApps = blocked.join(",");
-          currentAllowanceTime = data['allowanceTime'] ?? 0;
-          currentPin = data['securityPIN'] ?? "1234";
           matched = true;
           break;
         }
@@ -104,18 +109,22 @@ void startClassGuard() async {
       await prefs.setDouble('prevVolume', vol);
     } catch (_) {}
 
+    // Both Host and Student get their phones muted
     await SoundMode.setSoundMode(RingerModeStatus.silent);
 
-    await prefs.setString('blockedApps', currentBlockedApps);
-    await prefs.setInt('allowanceTime', currentAllowanceTime);
-    await prefs.setString('securityPIN', currentPin);
-    await prefs.setBool('isAppLockActive', true);
+    if (!isHost) {
+      await prefs.setString('blockedApps', currentBlockedApps);
+      await prefs.setInt('allowanceTime', currentAllowanceTime);
+      await prefs.setString('securityPIN', currentPin);
+      await prefs.setBool('isAppLockActive', true);
+    }
 
+    // MONOCHROME UI: White background, Black text
     Fluttertoast.showToast(
-      msg: "Class started: Device is Silent & Apps Locked",
+      msg: isHost ? "Class started: Device is Silent" : "Class started: Device is Silent & Apps Locked",
       toastLength: Toast.LENGTH_LONG,
-      backgroundColor: Colors.black,
-      textColor: Colors.white,
+      backgroundColor: Colors.white,
+      textColor: Colors.black,
     );
 
     await showClassGuardNotification(
@@ -143,11 +152,12 @@ void stopClassGuard() async {
     await prefs.setBool('isAppLockActive', false);
     await prefs.setBool('isWarmupActive', false);
 
+    // MONOCHROME UI: White background, Black text
     Fluttertoast.showToast(
       msg: "Class ended: Device is back to normal",
       toastLength: Toast.LENGTH_LONG,
-      backgroundColor: Colors.black,
-      textColor: Colors.white,
+      backgroundColor: Colors.white,
+      textColor: Colors.black,
     );
 
     await showClassGuardNotification(

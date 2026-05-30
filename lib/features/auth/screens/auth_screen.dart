@@ -1,9 +1,12 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+
+// Adjusted imports to match Feature-First architecture
 import 'package:classguard/core/routes/app_routes.dart';
 import 'package:classguard/features/dashboard/screens/home_screen.dart';
 import 'package:classguard/features/auth/services/auth_service.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
 
 // AUTHENTICATION SCREEN (FIREBASE AUTH)
 class AuthScreen extends StatefulWidget {
@@ -30,6 +33,7 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  // CORE LOGIC: Keep original authentication logic intact
   Future<void> _submitAuth() async {
     if (emailController.text.isEmpty || passwordController.text.isEmpty) {
       Fluttertoast.showToast(
@@ -50,14 +54,14 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       final result = isLogin
           ? await _authService.login(
-              email: emailController.text,
-              password: passwordController.text,
-            )
+        email: emailController.text,
+        password: passwordController.text,
+      )
           : await _authService.signup(
-              name: nameController.text,
-              email: emailController.text,
-              password: passwordController.text,
-            );
+        name: nameController.text,
+        email: emailController.text,
+        password: passwordController.text,
+      );
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -130,38 +134,14 @@ class _AuthScreenState extends State<AuthScreen> {
                   decoration: _authInputStyle('Password', Icons.lock_outline),
                 ),
                 const SizedBox(height: 40),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: isLoading ? null : _submitAuth,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Text(
-                            isLogin ? 'Log In' : 'Sign Up',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                  ),
+
+                // REUSABLE WIDGET: Replaced raw ElevatedButton with PrimaryButton
+                PrimaryButton(
+                  text: isLogin ? 'Log In' : 'Sign Up',
+                  isLoading: isLoading,
+                  onPressed: _submitAuth,
                 ),
+
                 const SizedBox(height: 16),
                 Center(
                   child: TextButton(

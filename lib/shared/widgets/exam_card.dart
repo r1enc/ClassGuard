@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../models/exam.dart';
-import '../feedback/status_badge.dart';
+
+import 'package:classguard/models/exam.dart';
+import 'package:classguard/shared/feedback/status_badge.dart';
 
 class ExamCard extends StatelessWidget {
   final Exam exam;
   final String formattedExamType;
   final VoidCallback onOpenDashboard;
   final VoidCallback? onDelete; // Made optional to handle different screen needs
+  
+  // ADDED: Flag to control UI state (active vs history)
+  final bool isActive; 
 
   const ExamCard({
     super.key,
@@ -16,6 +20,8 @@ class ExamCard extends StatelessWidget {
     required this.formattedExamType,
     required this.onOpenDashboard,
     this.onDelete,
+    // Default to true so HomeScreen remains unchanged and keeps the red shadow
+    this.isActive = true, 
   });
 
   @override
@@ -35,10 +41,20 @@ class ExamCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.redAccent, width: 2),
-        boxShadow: [
+        // MODIFIED: Dynamic border color based on active status
+        border: isActive 
+            ? Border.all(color: Colors.redAccent, width: 2) 
+            : Border.all(color: Colors.white24, width: 1),
+        // MODIFIED: Dynamic shadow based on active status
+        boxShadow: isActive ? [
           BoxShadow(
             color: Colors.redAccent.withValues(alpha: 0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ] : [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -126,9 +142,10 @@ class ExamCard extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: onOpenDashboard,
               icon: const Icon(Icons.monitor, size: 20, color: Colors.black),
-              label: const Text(
-                'Open Exam Dashboard',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+              // MODIFIED: Change button text if inactive to prevent confusion
+              label: Text(
+                isActive ? 'Open Exam Dashboard' : 'View Details',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,

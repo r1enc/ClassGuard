@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../../theme/app_theme.dart';
-import '../../widgets/primary_button.dart';
+import 'package:classguard/core/theme/app_theme.dart';
+import 'package:classguard/shared/widgets/primary_button.dart';
 
 class ExamResultScreen extends StatelessWidget {
   const ExamResultScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // PopScope intercepts the hardware back button to prevent accidental exits
+    // SECURITY: PopScope prevents user from going back via hardware button
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        // Forces the user to navigate exclusively via the "Back to Home" button
       },
       child: Scaffold(
         backgroundColor: AppTheme.backgroundColor,
@@ -24,7 +23,6 @@ class ExamResultScreen extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(),
-
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
@@ -38,33 +36,22 @@ class ExamResultScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 32),
-
                 const Text(
                   'Exam Submitted!',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textDark,
-                  ),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                 ),
                 const SizedBox(height: 16),
-
                 const Text(
                   'Answers submitted successfully.\nPlease wait for the host to announce the results.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppTheme.textLight,
-                    height: 1.5,
-                  ),
+                  style: TextStyle(fontSize: 14, color: AppTheme.textLight, height: 1.5),
                 ),
-
                 const Spacer(),
 
+                // REUSABLE WIDGET
                 PrimaryButton(
                   text: 'Back to Home',
                   onPressed: () {
-                    // Clears the entire exam navigation stack and returns safely to the root Home Screen
                     Navigator.of(context).popUntil((route) => route.isFirst);
                   },
                 ),
