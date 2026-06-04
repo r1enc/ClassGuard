@@ -13,12 +13,24 @@ const db = admin.firestore();
 async function main() {
   console.log("Firebase Connected");
 
-  const snapshot = await db.collection("schedules").limit(1).get();
+  const snapshot = await db
+    .collection("schedules")
+    .where("isActive", "==", true)
+    .get();
+
+  console.log(`Found ${snapshot.size} active schedules`);
 
   snapshot.forEach((doc) => {
-  console.log(doc.id);
-  console.log(doc.data());
-});
+    const data = doc.data();
+
+    console.log({
+      id: doc.id,
+      day: data.day,
+      startTime: data.startTime,
+      userId: data.userId,
+      isActive: data.isActive,
+    });
+  });
 }
 
 main().catch(console.error);
