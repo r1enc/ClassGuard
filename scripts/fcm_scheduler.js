@@ -1,3 +1,4 @@
+// Initializes Firebase Admin SDK using GitHub Actions secrets.
 const admin = require("firebase-admin");
 
 const serviceAccount = JSON.parse(
@@ -10,6 +11,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
+// Calculates the target schedule time (current WIB time + 5 minutes).
 function getCurrentWIBPlus5Minutes() {
   const now = new Date();
 
@@ -31,15 +33,18 @@ function getCurrentWIBPlus5Minutes() {
   };
 }
 
+// Main scheduler process executed by GitHub Actions.
 async function main() {
   console.log("Firebase Connected");
 
+  // Determines which schedules should receive a warmup notification.
   const target = getCurrentWIBPlus5Minutes();
 
   console.log(
     `Looking for schedules on ${target.day} at ${target.startTime}`
   );
 
+  // Retrieves active schedules that are about to start within the warmup window.
   const schedules = await db
     .collection("schedules")
     .where("isActive", "==", true)
@@ -52,6 +57,7 @@ async function main() {
   for (const scheduleDoc of schedules.docs) {
     const schedule = scheduleDoc.data();
 
+    // Retrieves the schedule owner's FCM token.
     const userDoc = await db
       .collection("users")
       .doc(schedule.userId)
@@ -64,11 +70,13 @@ async function main() {
 
     const userData = userDoc.data();
 
+    // Skip schedules whose owners do not have a registered FCM token.
     if (!userData.fcmToken) {
       console.log(`No FCM token for user: ${schedule.userId}`);
       continue;
     }
 
+    // Sends a high-priority warmup notification to the target device.
     const message = {
       token: userData.fcmToken,
       data: {
@@ -80,6 +88,7 @@ async function main() {
     };
 
     try {
+      // Logs successful warmup delivery for monitoring and debugging purposes.
       const response = await admin.messaging().send(message);
 
       console.log(
@@ -93,5 +102,5 @@ async function main() {
     }
   }
 }
-
+// Prevents the scheduler from terminating silently when an unexpected error occurs.
 main().catch(console.error);

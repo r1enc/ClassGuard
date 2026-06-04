@@ -1,5 +1,5 @@
 name: ClassGuard FCM Scheduler
-
+# Executes the FCM warmup scheduler automatically every minute.
 on:
   schedule:
     - cron: '* * * * *'
@@ -10,18 +10,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+        # Checks out the latest repository source code.
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+        # Prepares the Node.js runtime environment required by the scheduler.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+        # Installs project dependencies before execution.
       - name: Install Dependencies
         run: npm install
 
+        # Runs the scheduler that evaluates upcoming schedules and sends warmup notifications.
       - name: Run Scheduler
+        # Provides Firebase service account credentials securely through GitHub Secrets.
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/fcm_scheduler.js
