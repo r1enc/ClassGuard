@@ -10,6 +10,7 @@ import 'package:sound_mode/permission_handler.dart';
 import 'package:sound_mode/sound_mode.dart';
 import 'package:sound_mode/utils/ringer_mode_statuses.dart';
 import 'package:volume_controller/volume_controller.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'package:classguard/core/background/alarm_service.dart';
 import 'package:classguard/core/services/firestore_service.dart';
@@ -42,7 +43,6 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-// ADDED: WidgetsBindingObserver to detect when the app returns from the background
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription? _scheduleSubscription;
   late Stream<QuerySnapshot> _schedulesStream;
@@ -62,7 +62,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // Register the observer
     WidgetsBinding.instance.addObserver(this);
 
     _alarmService = AlarmService(platform: platform);
@@ -71,6 +70,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     FlutterLocalNotificationsPlugin()
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
+
+    _setupFCMToken();
 
     _schedulesStream = _firestoreService.schedulesStreamForCurrentUser();
 
@@ -100,16 +101,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _setupFCMToken() async {
+    try {
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      String? token = await messaging.getToken();
+      String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
+      if (token != null && uid.isNotEmpty) {
+        // Use .set with SetOptions(merge: true) to safely update or create the document
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'fcmToken': token,
+        }, SetOptions(merge: true));
+
+        debugPrint("Token successfully granted.");
+      } else {
+        debugPrint("Failed: FCM Token is null or UID is empty.");
+      }
+    } catch (e) {
+      debugPrint("Error fetching or saving FCM Token: $e");
+    }
+  }
+
   @override
   void dispose() {
-    // Remove the observer to prevent memory leaks
     WidgetsBinding.instance.removeObserver(this);
     _scheduleSubscription?.cancel();
     _minuteTimer?.cancel();
     super.dispose();
   }
 
-  // ADDED: Instantly trigger checks when user resumes the app to fix UI timer sleep
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -247,17 +273,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         int end = timeToMinutes(data['endTime'] ?? "00:00");
 
         if (currentMins >= start && currentMins < end) {
-          // CORE LOGIC UPDATE: Determine if user is Host to apply logic conditionally
           bool isHost = (data['role'] == 'Teacher' && data['userId'] == uid);
-
-          // This prevents the system from spamming notifications and silent mode for the Host
           bool wasSessionActive = prefs.getBool('isClassSessionActive') ?? false;
 
           if (!wasSessionActive) {
             double currentVol = await VolumeController().getVolume();
             await prefs.setDouble('prevVolume', currentVol);
 
-            // Silent mode executes for EVERYONE, including Host
             if (data['isSilentModeEnabled'] == true) {
               try {
                 await SoundMode.setSoundMode(RingerModeStatus.silent);
@@ -268,7 +290,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
             }
 
-            // MONOCHROME UI: Start Session
             Fluttertoast.showToast(
               msg: isHost ? "Class started: Device is Silent" : "Class started: Device is Silent & Apps Locked",
               toastLength: Toast.LENGTH_LONG,
@@ -276,17 +297,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               textColor: Colors.black,
             );
 
-            // Mark session as active so it only triggers once
             await prefs.setBool('isClassSessionActive', true);
           }
 
-          // AppLock only executes for Students. Host is exempted.
           if (!isHost) {
             List<dynamic> rawApps = data['blockedApps'] ?? [];
             List<String> finalBlockedApps = rawApps.map((e) => e.toString()).toList();
 
-            // CORE LOGIC: VIP Access processing
-            // Safely handle Map structures from Firestore using the correct keys
             if (data.containsKey('vipAccess')) {
               var vipData = data['vipAccess'];
 
@@ -332,7 +349,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           debugPrint("Normal mode error: $e");
         }
 
-        // MONOCHROME UI: End Session
         Fluttertoast.showToast(
           msg: "Class ended: Device is back to normal",
           toastLength: Toast.LENGTH_LONG,
