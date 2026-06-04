@@ -27,7 +27,7 @@ class MainActivity: FlutterActivity() {
     private val AUDIO_CHANNEL = "classguard/audio"
     private val APPLOCK_CHANNEL = "com.classguard/applock"
     private val APPINFO_CHANNEL = "com.classguard/app_info"
-// Native communication bridge between Flutter and Android system APIs.
+    // Native communication bridge between Flutter and Android system APIs.
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -136,6 +136,70 @@ class MainActivity: FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "setWarmupAlarmClock" -> {
+                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    val timeInMillis = call.argument<Long>("timeInMillis") ?: 0L
+                    if (timeInMillis > System.currentTimeMillis()) {
+                        val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+
+                        // operationIntent: The intent triggered when the alarm fires, targeting the BroadcastReceiver.
+                        val receiverIntent = Intent(this@MainActivity, PopupAlarmReceiver::class.java).apply {
+                            action = "com.classguard.ACTION_WARMUP"
+                        }
+                        val operationPi = PendingIntent.getBroadcast(
+                            this@MainActivity,
+                            alarmId,
+                            receiverIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+
+                        // showIntent: Displays the alarm icon in the status bar.
+                        // Requires an Activity to prevent rejection by certain custom ROMs (e.g., Vivo, OPPO).
+                        val showIntent = Intent(this@MainActivity, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        val showPi = PendingIntent.getActivity(
+                            this@MainActivity,
+                            alarmId + 99000, // Unique ID to prevent conflict with operationPi
+                            showIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+
+                        // AlarmClockInfo bypasses Deep Doze mode, serving as the most reliable scheduling method.
+                        // Parameter structure: AlarmClockInfo(timeInMillis, showIntent) -> execute(operationIntent)
+                        val info = android.app.AlarmManager.AlarmClockInfo(timeInMillis, showPi)
+                        am.setAlarmClock(info, operationPi)
+                    }
+                    result.success(true)
+                }
+                "cancelWarmupAlarmClock" -> {
+                    val alarmId = call.argument<Int>("alarmId") ?: 0
+                    val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+
+                    // Cancel the receiver operation intent.
+                    val receiverIntent = Intent(this@MainActivity, PopupAlarmReceiver::class.java).apply {
+                        action = "com.classguard.ACTION_WARMUP"
+                    }
+                    val operationPi = PendingIntent.getBroadcast(
+                        this@MainActivity,
+                        alarmId,
+                        receiverIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    am.cancel(operationPi)
+
+                    // Cancel the status bar icon intent using the identical request ID.
+                    val showIntent = Intent(this@MainActivity, MainActivity::class.java)
+                    val showPi = PendingIntent.getActivity(
+                        this@MainActivity,
+                        alarmId + 99000,
+                        showIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    am.cancel(showPi)
+
+                    result.success(true)
+                }
                 "triggerEmergencyPopup" -> {
                     Toast.makeText(
                         applicationContext,
@@ -188,7 +252,7 @@ class MainActivity: FlutterActivity() {
         }
         return false
     }
-// Retrieve installed applications and usage statistics from Android system.
+    // Retrieve installed applications and usage statistics from Android system.
     private fun getInstalledApps(): List<Map<String, String>> {
         val appList = mutableListOf<Map<String, Any>>()
         val pm = packageManager

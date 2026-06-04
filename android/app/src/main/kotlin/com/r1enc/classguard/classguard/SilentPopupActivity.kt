@@ -12,22 +12,38 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.res.ResourcesCompat
 
 class SilentPopupActivity : Activity() {
 
     //-------------------------
     // UI SETUP & POPUP DIALOG
     //-------------------------
-    // Fullscreen security popup displayed when critical permissions are disabled.
+    // Reusable fullscreen monochrome popup for disabled permissions.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
         )
+
+        // Retrieve dynamic permission details from intent
+        val missingPermission = intent.getStringExtra("MISSING_PERMISSION") ?: "Core System"
+        val settingsAction = intent.getStringExtra("ACTION_SETTINGS") ?: Settings.ACTION_ACCESSIBILITY_SETTINGS
+
+        // Load Custom Fonts from Android Resources (res/font)
+        var fontRegular = Typeface.create("sans-serif", Typeface.NORMAL)
+        var fontBold = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        try {
+            val resFontRegular = ResourcesCompat.getFont(this, R.font.montserrat_regular)
+            val resFontBold = ResourcesCompat.getFont(this, R.font.montserrat_bold)
+            if (resFontRegular != null) fontRegular = resFontRegular
+            if (resFontBold != null) fontBold = resFontBold
+        } catch (e: Exception) {
+            // Proceeding with default system fonts if custom fonts are missing
+        }
 
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -46,19 +62,19 @@ class SilentPopupActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "Security Alert"
+            text = "Action Required"
             textSize = 18f
             setTextColor(Color.BLACK)
-            setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+            typeface = fontBold
             gravity = Gravity.CENTER
             setPadding(dpToPx(16), dpToPx(24), dpToPx(16), dpToPx(8))
         }
 
         val message = TextView(this).apply {
-            text = "Core system permissions are disabled.\nClassGuard cannot function properly.\nPlease re-enable Accessibility."
+            text = "$missingPermission permission is disabled.\nClassGuard cannot function properly.\nPlease re-enable it to continue."
             textSize = 14f
-            setTextColor(Color.parseColor("#333333"))
-            setTypeface(Typeface.create("sans-serif", Typeface.NORMAL))
+            setTextColor(Color.BLACK)
+            typeface = fontRegular
             gravity = Gravity.CENTER
             setPadding(dpToPx(16), 0, dpToPx(16), dpToPx(24))
         }
@@ -67,7 +83,7 @@ class SilentPopupActivity : Activity() {
             text = "Fix Now"
             textSize = 16f
             setTextColor(Color.WHITE)
-            setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+            typeface = fontBold
             gravity = Gravity.CENTER
 
             background = GradientDrawable().apply {
@@ -79,11 +95,18 @@ class SilentPopupActivity : Activity() {
                 setMargins(dpToPx(20), 0, dpToPx(20), dpToPx(20))
             }
             isClickable = true
-            // Redirect user directly into Android accessibility settings.
+
+            // Redirect user directly into the specific Android settings page
             setOnClickListener {
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
+                try {
+                    val intent = Intent(settingsAction)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val fallback = Intent(Settings.ACTION_SETTINGS)
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(fallback)
+                }
                 finish()
             }
         }
@@ -99,6 +122,7 @@ class SilentPopupActivity : Activity() {
     private fun dpToPx(dp: Int): Int {
         return (dp * resources.displayMetrics.density).toInt()
     }
+
     // Disable back navigation while security popup is active.
     override fun onBackPressed() {}
 }
