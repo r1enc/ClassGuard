@@ -17,9 +17,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          
+
       - name: Install Dependencies
         run: npm install
 
       - name: Run Scheduler
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/fcm_scheduler.js
