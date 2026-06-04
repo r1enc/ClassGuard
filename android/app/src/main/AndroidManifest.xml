@@ -87,6 +87,14 @@
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Schedule Protection" />
         </service>
+
+        <service
+        android:name=".ClassGuardFcmService"
+        android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 <!-- Restore protection service after reboot -->
         <receiver
             android:name=".BootReceiver"
