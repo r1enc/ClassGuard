@@ -23,14 +23,11 @@ function getCurrentWIBPlus5Minutes() {
 
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-  const day = days[wib.getDay()];
-
-  const hours = String(wib.getHours()).padStart(2, "0");
-  const minutes = String(wib.getMinutes()).padStart(2, "0");
-
   return {
-    day,
-    startTime: `${hours}:${minutes}`,
+    day: days[wib.getDay()],
+    startTime: `${String(wib.getHours()).padStart(2, "0")}:${String(
+      wib.getMinutes()
+    ).padStart(2, "0")}`,
   };
 }
 
@@ -43,25 +40,58 @@ async function main() {
     `Looking for schedules on ${target.day} at ${target.startTime}`
   );
 
-  const snapshot = await db
+  const schedules = await db
     .collection("schedules")
     .where("isActive", "==", true)
     .where("day", "==", target.day)
     .where("startTime", "==", target.startTime)
     .get();
 
-  console.log(`Found ${snapshot.size} matching schedules`);
+  console.log(`Found ${schedules.size} matching schedules`);
 
-  snapshot.forEach((doc) => {
-    const data = doc.data();
+  for (const scheduleDoc of schedules.docs) {
+    const schedule = scheduleDoc.data();
 
-    console.log({
-      id: doc.id,
-      day: data.day,
-      startTime: data.startTime,
-      userId: data.userId,
-    });
-  });
+    const userDoc = await db
+      .collection("users")
+      .doc(schedule.userId)
+      .get();
+
+    if (!userDoc.exists) {
+      console.log(`User not found: ${schedule.userId}`);
+      continue;
+    }
+
+    const userData = userDoc.data();
+
+    if (!userData.fcmToken) {
+      console.log(`No FCM token for user: ${schedule.userId}`);
+      continue;
+    }
+
+    const message = {
+      token: userData.fcmToken,
+      data: {
+        action: "WARMUP",
+      },
+      android: {
+        priority: "high",
+      },
+    };
+
+    try {
+      const response = await admin.messaging().send(message);
+
+      console.log(
+        `WARMUP sent to ${schedule.userId}: ${response}`
+      );
+    } catch (error) {
+      console.error(
+        `Failed sending to ${schedule.userId}`,
+        error.message
+      );
+    }
+  }
 }
 
 main().catch(console.error);
