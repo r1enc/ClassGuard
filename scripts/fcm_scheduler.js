@@ -35,8 +35,8 @@ async function main() {
   console.log("Firebase Connected");
 
   const target = {
-  day: "Fri",
-  startTime: "19:00",
+  day: "Thu",
+  startTime: "15:50",
 };
 
   console.log(
