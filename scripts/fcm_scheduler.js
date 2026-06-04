@@ -34,10 +34,7 @@ function getCurrentWIBPlus5Minutes() {
 async function main() {
   console.log("Firebase Connected");
 
-  const target = {
-  day: "Mon",
-  startTime: "16:10",
-};
+  const target = getCurrentWIBPlus5Minutes();
 
   console.log(
     `Looking for schedules on ${target.day} at ${target.startTime}`
