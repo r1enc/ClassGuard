@@ -18,8 +18,10 @@ class AlarmService {
     for (var id in activeAlarmIds) {
       AndroidAlarmManager.cancel(id);
       platform.invokeMethod('cancelNativePopupAlarm', {'alarmId': id});
+      
       // Also cancel the warmup alarm
       AndroidAlarmManager.cancel(id + 10000);
+      platform.invokeMethod('cancelWarmupAlarmClock', {'alarmId': id + 10000});
     }
     activeAlarmIds.clear();
 
@@ -82,13 +84,25 @@ class AlarmService {
     // WARMUP ALARM LOGIC (5 MINUTES BEFORE)
     DateTime warmupTime = scheduleTime.subtract(const Duration(minutes: 5));
     if (warmupTime.isAfter(now)) {
-      await AndroidAlarmManager.oneShot(
-        warmupTime.difference(now),
-        alarmId + 10000, // Unique ID for warmup
-        wakeUpClassGuard,
-        exact: true,
-        wakeup: true,
-      );
+      
+      // MODIFIED: Replaced AndroidAlarmManager with Native sAC via MethodChannel
+      try {
+        platform.invokeMethod('setWarmupAlarmClock', {
+          'alarmId': alarmId + 10000,
+          'timeInMillis': warmupTime.millisecondsSinceEpoch,
+        });
+      } catch (e) {
+        debugPrint("Failed to set native warmup alarm: $e");
+      }
+
+      // PREVIOUS LOGIC (Disabled but kept for reference):
+      // await AndroidAlarmManager.oneShot(
+      //   warmupTime.difference(now),
+      //   alarmId + 10000, // Unique ID for warmup
+      //   wakeUpClassGuard,
+      //   exact: true,
+      //   wakeup: true,
+      // );
     }
 
     // MAIN ALARM
