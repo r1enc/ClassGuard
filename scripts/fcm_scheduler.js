@@ -15,7 +15,10 @@ async function main() {
 
   const snapshot = await db.collection("schedules").limit(1).get();
 
-  console.log(`Found ${snapshot.size} schedule(s)`);
+  snapshot.forEach((doc) => {
+  console.log(doc.id);
+  console.log(doc.data());
+});
 }
 
 main().catch(console.error);
