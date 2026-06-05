@@ -17,6 +17,7 @@ import 'package:classguard/shared/widgets/section_header.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  // Constructs a reusable card component for displaying instructional content.
   Widget _buildHowToCard(String title, String content) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -96,6 +97,7 @@ class SettingsScreen extends StatelessWidget {
             subtitle: 'Learn how to setup focus schedules',
             trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.black26),
             onTap: () {
+              // Displays a dynamic, paginated bottom sheet containing the application's user guide.
               showModalBottomSheet(
                   context: context,
                   backgroundColor: AppTheme.backgroundColor,
@@ -159,6 +161,7 @@ class SettingsScreen extends StatelessWidget {
               final authService = AuthService();
               final canLogout = await authService.canLogout();
 
+              // Validates the current session state to prevent users from bypassing security locks via logout.
               if (!canLogout) {
                 Fluttertoast.showToast(msg: "Cannot logout while a session is actively running.", backgroundColor: Colors.red);
                 return;
@@ -211,6 +214,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _loadProfileData();
   }
 
+  // Retrieves the user's existing profile information from the authentication service.
   Future<void> _loadProfileData() async {
     final profile = await _authService.loadProfileData();
     setState(() {
@@ -221,6 +225,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
   }
 
+  // Handles device gallery access and converts the selected image into a Base64 string for storage.
   Future<void> _pickImage() async {
     try {
       final pickedImage = await _authService.pickAndSaveProfileImage();
@@ -307,6 +312,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               isLoading: isLoading,
               onPressed: () async {
                 setState(() => isLoading = true);
+                // Synchronizes the modified profile parameters with the remote database.
                 await _authService.saveProfile(
                   name: nameController.text,
                   email: emailController.text,

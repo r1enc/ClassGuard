@@ -166,6 +166,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
             ),
             const SizedBox(height: 24),
 
+            // Controls the activation of the background application monitoring service.
             SettingCard(
               icon: Icons.block,
               title: 'App Lock',
@@ -204,6 +205,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
+                    // Launches the package selection interface to define restricted applications.
                     ElevatedButton(
                       onPressed: () async {
                         FocusScope.of(context).unfocus();
@@ -269,6 +271,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
 
                 setState(() => isLoading = true);
                 
+                // Validates the provided time slots against existing schedules to prevent overlaps.
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,
@@ -288,6 +291,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 }
 
                 try {
+                  // Persists the newly created or modified schedule configuration to Cloud Firestore.
                   await _firestoreService.savePersonalSchedule(
                     scheduleId: widget.courseToEdit?.id,
                     subject: subjectController.text,
