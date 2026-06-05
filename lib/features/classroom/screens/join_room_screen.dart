@@ -5,6 +5,7 @@ import 'package:classguard/core/services/firestore_service.dart';
 import 'package:classguard/core/theme/app_theme.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 
+// Enables students to enroll in active classroom sessions using a secure, teacher-generated access code.
 class JoinRoomScreen extends StatefulWidget {
   final String userName;
   const JoinRoomScreen({super.key, required this.userName});
@@ -24,6 +25,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
     super.dispose();
   }
 
+  // CORE LOGIC: Queries Firestore for the provided classroom code, verifies schedule availability, and enrolls the student into the active session.
   Future<void> _joinClassroom() async {
     if (codeController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid code.')));
@@ -47,6 +49,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
       String roomStart = roomData['startTime'] ?? '00:00';
       String roomEnd = roomData['endTime'] ?? '00:00';
 
+      // Validates the session time against the student's existing schedules to prevent conflicts.
       String? collisionError = await _firestoreService.checkAndHandleCollision(roomDay, roomStart, roomEnd, 'Student');
 
       if (collisionError != null) {
@@ -59,6 +62,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         }
       }
 
+      // Appends the student's UID and join timestamp to the classroom document.
       await _firestoreService.joinClassroom(roomId: roomDoc.id, userName: widget.userName);
 
       if (context.mounted) {
