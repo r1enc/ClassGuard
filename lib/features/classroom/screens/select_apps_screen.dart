@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class SelectAppsScreen extends StatefulWidget {
+  // Holds the initially selected apps passed from the previous screen
   final List<String> initialSelectedApps;
   const SelectAppsScreen({super.key, required this.initialSelectedApps});
 
@@ -18,21 +19,26 @@ class SelectAppsScreen extends StatefulWidget {
 }
 
 class _SelectAppsScreenState extends State<SelectAppsScreen> {
+  // Platform channel to communicate with native code for retrieving device apps
   static const platformAppInfo = MethodChannel('com.classguard/app_info');
   final FirestoreService _firestoreService = FirestoreService();
 
+  // Variables to store fetched application data
   List<Map<String, dynamic>> _installedApps = [];
   List<Map<String, dynamic>> _masterApps = [];
 
+  // Loading state indicators for asynchronous data fetching
   bool _isLoadingInstalled = true;
   bool _isLoadingMaster = true;
   bool _showAll = false;
 
+  // Stores the current list of selected application packages
   List<String> _selectedPackages = [];
 
   @override
   void initState() {
     super.initState();
+    // Initialize the selection list with the provided initial data
     _selectedPackages = List.from(widget.initialSelectedApps);
     _fetchMasterApps();
     _fetchInstalledApps();
@@ -47,6 +53,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
         _isLoadingMaster = false;
       });
     } catch (e) {
+      // Handle potential errors and update loading state
       setState(() => _isLoadingMaster = false);
     }
   }
@@ -56,10 +63,12 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
     try {
       final List<dynamic> apps = await platformAppInfo.invokeMethod('getInstalledApps');
       setState(() {
+        // Map dynamic data to a structured Map format for UI consumption
         _installedApps = apps.map((e) => Map<String, dynamic>.from(e)).toList();
         _isLoadingInstalled = false;
       });
     } catch (e) {
+      // Ensure loading indicator is removed even if the fetch fails
       setState(() => _isLoadingInstalled = false);
     }
   }
@@ -67,6 +76,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
   // STATE MANAGEMENT: Update UI selection state dynamically
   void _toggleSelection(String packageName) {
     setState(() {
+      // Add or remove the package name based on its current presence in the list
       if (_selectedPackages.contains(packageName)) {
         _selectedPackages.remove(packageName);
       } else {
@@ -76,12 +86,15 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
   }
 
   void _saveSelection() {
+    // Convert to Set to prevent duplicate packages, then back to List
     List<String> finalBlockedApps = _selectedPackages.toSet().toList();
+    // Return the selected data to the previous screen
     Navigator.pop(context, finalBlockedApps);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Wait for both master and installed apps to finish loading
     bool isLoading = _isLoadingInstalled || _isLoadingMaster;
 
     return Scaffold(
@@ -107,7 +120,8 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                     child: Text("Most Frequently Used", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
                   ),
                   const SizedBox(height: 10),
-                  
+
+                  // Display a limited initial set of installed apps to optimize UI rendering
                   ..._installedApps.take(9).map((app) => AppSelectionTile(
                     name: app['name'],
                     packageName: app['package'],
@@ -116,6 +130,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                     onToggle: _toggleSelection,
                   )).toList(),
 
+                  // Display the expand button if not all apps are shown yet
                   if (!_showAll && _installedApps.length > 9)
                     Center(
                       child: Padding(
@@ -132,7 +147,8 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                         ),
                       ),
                     ),
-                    
+
+                  // Render the rest of the applications if the user expands the list
                   if (_showAll) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -159,6 +175,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
     );
   }
 
+  // Widget to display the entry point for the curated master list of distracting apps
   Widget _buildMasterListFolder() {
     return GestureDetector(
       onTap: _openMasterFolderDialog,
@@ -195,11 +212,13 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
     );
   }
 
+  // Displays a blurred backdrop dialog showing apps fetched from Firestore
   void _openMasterFolderDialog() {
     showDialog(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.3),
       builder: (context) {
+        // Use StatefulBuilder to allow local state updates within the dialog instance
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             return BackdropFilter(
@@ -224,14 +243,17 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                               itemCount: _masterApps.length,
                               itemBuilder: (context, index) {
                                 var app = _masterApps[index];
+                                // Determine current selection state for the grid item
                                 bool isSelected = _selectedPackages.contains(app['package']);
 
+                                // Load network image if available, fallback to default icon
                                 Widget iconWidget = app['iconUrl'].toString().isNotEmpty
                                     ? ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(app['iconUrl'], fit: BoxFit.cover))
                                     : const Icon(Icons.apps, color: Colors.black54, size: 28);
 
                                 return GestureDetector(
                                   onTap: () {
+                                    // Update dialog state and parent state when an item is toggled
                                     setStateDialog(() => _toggleSelection(app['package']));
                                     setState(() {});
                                   },
@@ -245,6 +267,7 @@ class _SelectAppsScreenState extends State<SelectAppsScreen> {
                                             decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(14), border: Border.all(color: isSelected ? Colors.black : Colors.transparent, width: 1.5)),
                                             child: Center(child: iconWidget),
                                           ),
+                                          // Display a checkmark badge if the app is selected
                                           if (isSelected) Container(decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle), padding: const EdgeInsets.all(4), child: const Icon(Icons.check, color: Colors.white, size: 12)),
                                         ],
                                       ),

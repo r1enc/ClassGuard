@@ -12,6 +12,7 @@ import 'package:classguard/shared/widgets/setting_card.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
+// Facilitates the creation of a synchronous classroom session, generating a unique access code for student enrollment.
 class CreateRoomScreen extends StatefulWidget {
   const CreateRoomScreen({super.key});
 
@@ -20,7 +21,7 @@ class CreateRoomScreen extends StatefulWidget {
 }
 
 class _CreateRoomScreenState extends State<CreateRoomScreen> {
-  // STATE MANAGEMENT: Controllers for text inputs and state tracking
+  // STATE MANAGEMENT: Controllers for text inputs and scheduling configurations
   final subjectController = TextEditingController();
   final lecturerController = TextEditingController();
   final roomController = TextEditingController();
@@ -33,7 +34,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   String selectedDay = "Mon";
   bool isAppLockEnabled = true;
   bool isSilentModeEnabled = true;
-  bool isLoading = false; 
+  bool isLoading = false;
 
   List<String> blockedPackages = [];
 
@@ -72,7 +73,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               message: "You are creating a classroom as a Teacher. A code will be generated for students.",
             ),
             const SizedBox(height: 24),
-            
+
             const Text('Day', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             DaySelector(
@@ -164,6 +165,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 24),
 
+            // Controls the activation of strict application blocking for enrolled students.
             SettingCard(
               icon: Icons.block,
               title: 'Enforce App Lock',
@@ -175,7 +177,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 onChanged: (val) => setState(() => isAppLockEnabled = val),
               ),
             ),
-            
+
             if (isAppLockEnabled) ...[
               const SizedBox(height: 12),
               const Align(
@@ -243,7 +245,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 48),
 
-            // CORE LOGIC: Input validation and conflict checking before writing to Firestore
+            // CORE LOGIC: Validates teacher inputs and performs collision checks to ensure no overlapping schedules exist before persisting to Cloud Firestore.
             PrimaryButton(
               text: 'Create Classroom',
               isLoading: isLoading,
@@ -265,7 +267,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 }
 
                 setState(() => isLoading = true);
-                
+
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,
@@ -286,6 +288,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 }
 
                 try {
+                  // Generates a unique 6-character alphanumeric room code and stores the session data.
                   String generatedCode = await _firestoreService
                       .createClassroom(
                     subject: subjectController.text,

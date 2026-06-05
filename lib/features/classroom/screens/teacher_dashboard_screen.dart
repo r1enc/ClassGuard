@@ -13,11 +13,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
+// Provides the instructor with a comprehensive dashboard to monitor active sessions, manage student access, and review attendance records.
 class TeacherDashboardScreen extends StatelessWidget {
   final Course course;
   const TeacherDashboardScreen({super.key, required this.course});
 
-  // CORE LOGIC: Clean up package names for better readability in the UI
+  // CORE LOGIC: Formats raw Android package names into user-friendly application titles for the VIP access interface.
   String _getCleanAppName(String packageName) {
     if (packageName == "all") return "All Applications";
     List<String> parts = packageName.split('.');
@@ -34,7 +35,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
 
-  // STATE MANAGEMENT: Handle temporary VIP access for specific students
+  // STATE MANAGEMENT: Controls the temporary bypass mechanism, allowing specific students to access restricted applications for a defined duration.
   void _showGrantAccessDialog(BuildContext context, String studentUid, String studentName, List<dynamic> blockedApps) {
     if (blockedApps.isEmpty) {
       Fluttertoast.showToast(msg: "No apps are blocked in this classroom.");
@@ -142,6 +143,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     );
   }
 
+  // UI COMPONENT: Renders a modal interface displaying currently enrolled students and their respective attendance status.
   void _showStudentsList(BuildContext context, Map<String, dynamic> studentNames, Map<String, dynamic> joinTimes, Map<String, dynamic> studentIds, String startTime, List<dynamic> blockedApps) {
     showModalBottomSheet(
       context: context,
@@ -169,7 +171,7 @@ class TeacherDashboardScreen extends StatelessWidget {
                           int startMins = _timeToMins(startTime);
                           int lateMins = 0;
                           
-                          // CORE LOGIC: Calculate if the student joined late
+                          // CORE LOGIC: Calculates attendance punctuality by comparing the student's join timestamp against the scheduled session start time.
                           if (joinTime.isNotEmpty) {
                             int jMins = _timeToMins(joinTime);
                             if (jMins > startMins) lateMins = jMins - startMins;
@@ -308,7 +310,7 @@ class TeacherDashboardScreen extends StatelessWidget {
             return const Center(child: Text('Classroom data not found.'));
           }
 
-          // CORE LOGIC: Verify if the current time falls within the active class duration
+          // CORE LOGIC: Evaluates the current system time against the defined schedule parameters to determine if the session is actively running.
           bool isActive = docData['isActive'] ?? false;
           final now = DateTime.now();
           final days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -401,6 +403,7 @@ class TeacherDashboardScreen extends StatelessWidget {
                           confirmText: 'End Session',
                           isDestructive: true,
                           onConfirm: () {
+                            // Initiates the session termination sequence, updating the database to release active locks on student devices.
                             String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
                             FirestoreService().endClassSession(scheduleId: course.id, uid: uid, studentNames: studentNames, studentIds: studentIds, joinTimes: joinTimes);
                             Fluttertoast.showToast(msg: "Class Session Ended. All student devices unlocked.");
