@@ -14,6 +14,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 
 class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
@@ -23,12 +24,11 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
     private val handler = Handler(Looper.getMainLooper())
     private var isChecking = false
 
-    // Continuously verify protection state and monitor critical permissions.
     private val checkRunnable = object : Runnable {
         override fun run() {
             val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
             val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
-            
+
             if (isAppLockActive || isExamLockActive) {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
@@ -44,7 +44,6 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
     }
 
-    // Start persistent protection service when focus mode, warmup, or exam becomes active.
     override fun onServiceConnected() {
         super.onServiceConnected()
         prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -63,13 +62,12 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         handler.post(checkRunnable)
     }
 
-    // React to realtime protection state changes from Flutter SharedPreferences.
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
         if (key == "flutter.isAppLockActive" || key == "flutter.isWarmupActive" || key == "flutter.isExamLockActive") {
             val isLockActive = sharedPreferences?.getBoolean("flutter.isAppLockActive", false) ?: false
             val isWarmupActive = sharedPreferences?.getBoolean("flutter.isWarmupActive", false) ?: false
             val isExamLockActive = sharedPreferences?.getBoolean("flutter.isExamLockActive", false) ?: false
-            
+
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
             if (isLockActive || isWarmupActive || isExamLockActive) {
@@ -86,6 +84,22 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
     }
 
+    // Using your original safe and stable function
+    private fun findTextInNode(node: AccessibilityNodeInfo?): List<String> {
+        val list = mutableListOf<String>()
+        if (node == null) return list
+        if (node.text != null) list.add(node.text.toString())
+        if (node.contentDescription != null) list.add(node.contentDescription.toString())
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                list.addAll(findTextInNode(child))
+                // Intentionally removed recycle() to prevent crashes on newer Android versions
+            }
+        }
+        return list
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
@@ -93,26 +107,70 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
             event.packageName?.let { currentForegroundPackage = it.toString() }
         }
 
+        // MAXIMUM UNINSTALL PROTECTION
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+
+            val packageName = event.packageName?.toString()?.lowercase() ?: ""
+
+            // Broad detection net: Settings, Installer, PlayStore, and LAUNCHER (Homescreen)
+            val isRiskyApp = packageName.contains("setting") ||
+                    packageName.contains("install") ||
+                    packageName.contains("launcher") ||
+                    packageName.contains("home") ||
+                    packageName.contains("vending") ||
+                    packageName.contains("sec") ||
+                    packageName.contains("miui") ||
+                    packageName.contains("coloros") ||
+                    packageName.contains("iqoo") ||
+                    packageName.contains("vivo") ||
+                    packageName.contains("huawei")
+
+            if (isRiskyApp) {
+                val nodeInfo = event.source
+                if (nodeInfo != null) {
+                    val textNodes = findTextInNode(nodeInfo)
+                    val textContent = textNodes.joinToString(" ").lowercase()
+                    // Remove spaces to anticipate "Class Guard" inputs
+                    val textNoSpaces = textContent.replace(" ", "")
+
+                    if (textNoSpaces.contains("classguard") &&
+                        (textContent.contains("uninstall") || textContent.contains("copot") ||
+                                textContent.contains("hapus") || textContent.contains("app info") ||
+                                textContent.contains("info aplikasi") || textContent.contains("clear data") ||
+                                textContent.contains("force stop") || textContent.contains("paksa berhenti"))) {
+
+                        val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
+                        val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
+
+                        if (isAppLockActive || isExamLockActive) {
+                            Log.d("ClassGuard", "Uninstall attempt blocked from package: $packageName")
+                            val intent = Intent(this, LockActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                putExtra("blocked_package", "System Settings")
+                            }
+                            startActivity(intent)
+                        }
+                    }
+                }
+            }
+        }
+
         checkAutoKick()
     }
 
-    // Automatically redirect blocked apps into secure lock screen activity.
     private fun checkAutoKick() {
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
         val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
-        
+
         if (!(isAppLockActive || isExamLockActive) || currentForegroundPackage.isEmpty()) return
-        
-        // NEVER BLOCK CLASSGUARD ITSELF
         if (currentForegroundPackage == packageName) return
 
         var isBlocked = false
 
         if (isExamLockActive) {
-            // STRICT EXAM LOCKDOWN: Block ALL other packages unconditionally
             isBlocked = true
         } else {
-            // NORMAL CLASS LOCKDOWN: Check blocked apps list
             val blockedAppsStr = prefs.getString("flutter.blockedApps", "") ?: ""
             val blockedAppsList = blockedAppsStr.split(",")
 
@@ -125,7 +183,13 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
         }
 
         if (isBlocked) {
-            // Only allow PIN Bypass / Allowance Time if NOT in Exam Mode
+            // Send signal to Flutter for the Live Activity Tracker feature
+            try {
+                val violationIntent = Intent("com.classguard.VIOLATION")
+                violationIntent.putExtra("packageName", currentForegroundPackage)
+                sendBroadcast(violationIntent)
+            } catch (e: Exception) {}
+
             if (!isExamLockActive) {
                 val tempUnlockUntil = prefs.getLong("flutter.tempUnlockUntil", 0L)
                 if (System.currentTimeMillis() < tempUnlockUntil) {
@@ -177,11 +241,7 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
 
     private fun triggerEmergencyPopup() {
         Handler(Looper.getMainLooper()).post {
-            Toast.makeText(
-                applicationContext,
-                "WARNING: CLASSGUARD PERMISSION DISABLED! SECURITY COMPROMISED!",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(applicationContext, "WARNING: CLASSGUARD PERMISSION DISABLED! SECURITY COMPROMISED!", Toast.LENGTH_LONG).show()
         }
 
         val popupIntent = Intent(this, SilentPopupActivity::class.java).apply {
@@ -197,14 +257,10 @@ class AppLockService : AccessibilityService(), SharedPreferences.OnSharedPrefere
     override fun onUnbind(intent: Intent?): Boolean {
         val isAppLockActive = prefs.getBoolean("flutter.isAppLockActive", false)
         val isExamLockActive = prefs.getBoolean("flutter.isExamLockActive", false)
-        
+
         if (isAppLockActive || isExamLockActive) {
             Handler(Looper.getMainLooper()).post {
-                Toast.makeText(
-                    applicationContext,
-                    "WARNING: CLASSGUARD ACCESSIBILITY REVOKED!",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(applicationContext, "WARNING: CLASSGUARD ACCESSIBILITY REVOKED!", Toast.LENGTH_LONG).show()
             }
             triggerEmergencyPopup()
         }

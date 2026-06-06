@@ -3,8 +3,10 @@ package com.r1enc.classguard.classguard
 import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -27,9 +29,30 @@ class MainActivity: FlutterActivity() {
     private val AUDIO_CHANNEL = "classguard/audio"
     private val APPLOCK_CHANNEL = "com.classguard/applock"
     private val APPINFO_CHANNEL = "com.classguard/app_info"
+    private var methodChannel: MethodChannel? = null
+
+    // Native receiver to capture violation broadcasts from AppLockService
+    private val violationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val pkg = intent?.getStringExtra("packageName")
+            if (pkg != null) {
+                methodChannel?.invokeMethod("onViolation", pkg)
+            }
+        }
+    }
+
     // Native communication bridge between Flutter and Android system APIs.
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APPLOCK_CHANNEL)
+
+        val filter = IntentFilter("com.classguard.VIOLATION")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(violationReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(violationReceiver, filter)
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "muteVolume") {
@@ -54,7 +77,7 @@ class MainActivity: FlutterActivity() {
             }
         }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APPLOCK_CHANNEL).setMethodCallHandler { call, result ->
+        methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "checkUsagePermission" -> result.success(hasUsageStatsPermission())
                 "requestUsagePermission" -> {
@@ -252,6 +275,7 @@ class MainActivity: FlutterActivity() {
         }
         return false
     }
+
     // Retrieve installed applications and usage statistics from Android system.
     private fun getInstalledApps(): List<Map<String, String>> {
         val appList = mutableListOf<Map<String, Any>>()
@@ -344,5 +368,10 @@ class MainActivity: FlutterActivity() {
         drawable.setBounds(0, 0, canvas.width, canvas.height)
         drawable.draw(canvas)
         return bitmap
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(violationReceiver)
     }
 }

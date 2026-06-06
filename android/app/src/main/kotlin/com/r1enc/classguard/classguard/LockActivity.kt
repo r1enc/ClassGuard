@@ -13,7 +13,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.Vibrator
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -62,6 +61,7 @@ class LockActivity : Activity() {
             else if (appNameRaw.contains("instagram")) appName = "Instagram"
             else if (appNameRaw.contains("facebook")) appName = "Facebook"
             else if (appNameRaw.contains("tiktok") || appNameRaw.contains("musically")) appName = "TikTok"
+            else if (appNameRaw.contains("System Settings")) appName = "System Settings"
         }
 
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -225,6 +225,16 @@ class LockActivity : Activity() {
         setContentView(rootLayout)
     }
 
+    override fun onResume() {
+        super.onResume()
+        prefs.edit().putBoolean("flutter.isLockScreenVisible", true).apply()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        prefs.edit().putBoolean("flutter.isLockScreenVisible", false).apply()
+    }
+
     //-------------
     // NUMPAD LOGIC
     //-------------
@@ -308,26 +318,26 @@ class LockActivity : Activity() {
     private fun startCooldown() {
         isCooldown = true
 
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(android.os.VibrationEffect.createOneShot(500, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            vibrator.vibrate(500)
-        }
-
         subtitleDisplay.setTextColor(Color.parseColor("#D32F2F"))
-        var timeLeft = 10
+
+        // Exponential cooldown multiplier.
+        // Base time is 10s. Doubles for every failed attempt after 3 tries.
+        var multiplier = 1
+        if (wrongAttempts > 3) {
+            multiplier = Math.pow(2.0, (wrongAttempts - 3).toDouble()).toInt()
+        }
+        var timeLeft = 10 * multiplier
 
         val handler = Handler(Looper.getMainLooper())
         val runnable = object : Runnable {
             override fun run() {
                 if (timeLeft > 0) {
+                    // Dynamic countdown text displayed only during active cooldown.
                     subtitleDisplay.text = "Too many attempts.\nLocked for ${timeLeft}s"
                     timeLeft--
                     handler.postDelayed(this, 1000)
                 } else {
                     isCooldown = false
-                    wrongAttempts = 0
                     subtitleDisplay.text = ""
                     subtitleDisplay.setTextColor(Color.parseColor("#555555"))
                 }
