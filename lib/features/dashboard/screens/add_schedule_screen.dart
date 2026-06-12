@@ -5,6 +5,7 @@ import 'package:classguard/core/services/firestore_service.dart';
 import 'package:classguard/core/theme/app_theme.dart';
 
 // UI KIT IMPORTS
+import 'package:classguard/shared/widgets/custom_time_picker.dart';
 import 'package:classguard/shared/widgets/day_selector.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:classguard/shared/widgets/setting_card.dart';
@@ -31,7 +32,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
   String selectedDay = "Mon";
   bool isAppLockEnabled = true;
   bool isSilentModeEnabled = true;
-  bool isLoading = false; 
+  bool isLoading = false;
   List<String> blockedPackages = [];
 
   @override
@@ -127,7 +128,17 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: startTimeController,
-                        decoration: AppTheme.baseInputDecoration("e.g., 08:00"),
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: startTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => startTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
                       ),
                     ],
                   ),
@@ -144,7 +155,17 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: endTimeController,
-                        decoration: AppTheme.baseInputDecoration("e.g., 10:30"),
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: endTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => endTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
                       ),
                     ],
                   ),
@@ -177,7 +198,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 onChanged: (val) => setState(() => isAppLockEnabled = val),
               ),
             ),
-            
+
             if (isAppLockEnabled) ...[
               const SizedBox(height: 12),
               const Align(
@@ -250,12 +271,15 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
               text: widget.courseToEdit != null ? 'Update Schedule' : 'Save Schedule',
               isLoading: isLoading,
               onPressed: () async {
-                if (subjectController.text.isEmpty ||
-                    startTimeController.text.isEmpty ||
-                    endTimeController.text.isEmpty ||
-                    pinController.text.isEmpty) {
+                // MODIFIED: Strict validation for all required fields
+                if (subjectController.text.trim().isEmpty ||
+                    lecturerController.text.trim().isEmpty ||
+                    roomController.text.trim().isEmpty ||
+                    startTimeController.text.trim().isEmpty ||
+                    endTimeController.text.trim().isEmpty ||
+                    pinController.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Required fields are missing.')),
+                    const SnackBar(content: Text('All fields are required.')),
                   );
                   return;
                 }
@@ -268,7 +292,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 }
 
                 setState(() => isLoading = true);
-                
+
                 String? collisionError = await _firestoreService
                     .checkAndHandleCollision(
                   selectedDay,
@@ -323,3 +347,4 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
     );
   }
 }
+

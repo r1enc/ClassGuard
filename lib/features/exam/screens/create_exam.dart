@@ -5,6 +5,7 @@ import 'package:classguard/features/exam/screens/create_exam_questions.dart';
 
 // SHARED COMPONENTS
 import 'package:classguard/shared/feedback/info_banner.dart';
+import 'package:classguard/shared/widgets/custom_time_picker.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 
 class CreateExamScreen extends StatefulWidget {
@@ -36,11 +37,12 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
   }
 
   void _goToAddQuestions() {
-    if (titleController.text.isEmpty ||
-        creatorController.text.isEmpty ||
-        durationController.text.isEmpty ||
-        startTimeController.text.isEmpty ||
-        endTimeController.text.isEmpty ||
+    // MODIFIED: Strict validation for all required fields
+    if (titleController.text.trim().isEmpty ||
+        creatorController.text.trim().isEmpty ||
+        durationController.text.trim().isEmpty ||
+        startTimeController.text.trim().isEmpty ||
+        endTimeController.text.trim().isEmpty ||
         _selectedDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All fields are required.')));
       return;
@@ -152,7 +154,20 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
                     children: [
                       const Text('Start Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      TextField(controller: startTimeController, decoration: AppTheme.baseInputDecoration("e.g., 08:00")),
+                      TextField(
+                        controller: startTimeController,
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: startTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => startTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
+                      ),
                     ],
                   ),
                 ),
@@ -163,7 +178,20 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
                     children: [
                       const Text('End Time (24h)', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      TextField(controller: endTimeController, decoration: AppTheme.baseInputDecoration("e.g., 10:30")),
+                      TextField(
+                        controller: endTimeController,
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: endTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => endTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
+                      ),
                     ],
                   ),
                 ),
@@ -183,3 +211,4 @@ class _CreateExamScreenState extends State<CreateExamScreen> {
     );
   }
 }
+
