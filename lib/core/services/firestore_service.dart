@@ -21,7 +21,8 @@ class FirestoreService {
       ) {
     return _firestore.collection('schedules').doc(scheduleId).snapshots();
   }
-// Prevent overlapping schedules and prioritize classroom sessions over personal schedules.
+
+  // Prevent overlapping schedules and prioritize classroom sessions over personal schedules.
   Future<String?> checkAndHandleCollision(
       String newDay,
       String newStart,
@@ -106,6 +107,23 @@ class FirestoreService {
     });
   }
 
+  // Log unauthorized app access attempt by student during an active session
+  Future<void> logViolation({
+    required String scheduleId,
+    required String packageName,
+  }) async {
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    String timestamp = DateTime.now().toIso8601String();
+    await _firestore.collection('schedules').doc(scheduleId).update({
+      'violationLogs.$uid': FieldValue.arrayUnion([
+        {
+          'app': packageName,
+          'timestamp': timestamp,
+        }
+      ])
+    });
+  }
+
   Future<void> savePersonalSchedule({
     required String? scheduleId,
     required String subject,
@@ -157,7 +175,8 @@ class FirestoreService {
       });
     }
   }
-// Create synchronized classroom session with shared focus settings.
+
+  // Create synchronized classroom session with shared focus settings.
   Future<String> createClassroom({
     required String subject,
     required String lecturer,
@@ -181,6 +200,7 @@ class FirestoreService {
       'studentNames': {},
       'studentIds': {},
       'vipAccess': {},
+      'violationLogs': {},
       'history': [],
       'subject': subject,
       'lecturer': lecturer.isNotEmpty ? lecturer : 'Teacher',
@@ -228,7 +248,8 @@ class FirestoreService {
       'joinTimes.$uid': joinTime,
     });
   }
-// Temporarily allow blocked app access for selected classroom members.
+
+  // Temporarily allow blocked app access for selected classroom members.
   Future<void> grantVipAccess({
     required String? scheduleId,
     required String studentUid,
@@ -248,7 +269,8 @@ class FirestoreService {
       'history': updatedHistory,
     });
   }
-// Save attendance history before resetting classroom session state.
+
+  // Save attendance history before resetting classroom session state.
   Future<void> endClassSession({
     required String? scheduleId,
     required String uid,
@@ -277,6 +299,7 @@ class FirestoreService {
       'studentIds': {},
       'joinTimes': {},
       'vipAccess': {},
+      'violationLogs': {},
     });
   }
 
