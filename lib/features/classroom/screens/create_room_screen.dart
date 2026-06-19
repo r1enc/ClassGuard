@@ -5,6 +5,7 @@ import 'package:classguard/core/theme/app_theme.dart';
 
 // UI KIT IMPORTS
 import 'package:classguard/shared/feedback/info_banner.dart';
+import 'package:classguard/shared/widgets/custom_time_picker.dart';
 import 'package:classguard/shared/widgets/day_selector.dart';
 import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:classguard/shared/widgets/setting_card.dart';
@@ -12,7 +13,6 @@ import 'package:classguard/shared/widgets/setting_card.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
-// Facilitates the creation of a synchronous classroom session, generating a unique access code for student enrollment.
 class CreateRoomScreen extends StatefulWidget {
   const CreateRoomScreen({super.key});
 
@@ -21,7 +21,7 @@ class CreateRoomScreen extends StatefulWidget {
 }
 
 class _CreateRoomScreenState extends State<CreateRoomScreen> {
-  // STATE MANAGEMENT: Controllers for text inputs and scheduling configurations
+  // STATE MANAGEMENT: Controllers for text inputs and state tracking
   final subjectController = TextEditingController();
   final lecturerController = TextEditingController();
   final roomController = TextEditingController();
@@ -119,7 +119,17 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: startTimeController,
-                        decoration: AppTheme.baseInputDecoration("e.g., 08:00"),
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: startTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => startTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
                       ),
                     ],
                   ),
@@ -136,7 +146,17 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: endTimeController,
-                        decoration: AppTheme.baseInputDecoration("e.g., 10:30"),
+                        readOnly: true,
+                        onTap: () async {
+                          String? selected = await CustomTimePicker.show(
+                            context: context,
+                            initialTime: endTimeController.text,
+                          );
+                          if (selected != null) {
+                            setState(() => endTimeController.text = selected);
+                          }
+                        },
+                        decoration: AppTheme.baseInputDecoration("Tap to select time"),
                       ),
                     ],
                   ),
@@ -165,7 +185,6 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Controls the activation of strict application blocking for enrolled students.
             SettingCard(
               icon: Icons.block,
               title: 'Enforce App Lock',
@@ -245,20 +264,25 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 48),
 
-            // CORE LOGIC: Validates teacher inputs and performs collision checks to ensure no overlapping schedules exist before persisting to Cloud Firestore.
+            // CORE LOGIC: Input validation and conflict checking before writing to Firestore
             PrimaryButton(
               text: 'Create Classroom',
               isLoading: isLoading,
               onPressed: () async {
-                if (subjectController.text.isEmpty ||
-                    startTimeController.text.isEmpty ||
-                    endTimeController.text.isEmpty ||
-                    pinController.text.isEmpty) {
+                // MODIFIED: Strict validation for all required fields
+                if (subjectController.text.trim().isEmpty ||
+                    lecturerController.text.trim().isEmpty ||
+                    roomController.text.trim().isEmpty ||
+                    startTimeController.text.trim().isEmpty ||
+                    endTimeController.text.trim().isEmpty ||
+                    allowanceController.text.trim().isEmpty ||
+                    pinController.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Required fields are missing.')),
+                    const SnackBar(content: Text('All fields are required.')),
                   );
                   return;
                 }
+
                 if (pinController.text.length < 4) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('PIN must be 4 digits.')),
@@ -288,7 +312,6 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 }
 
                 try {
-                  // Generates a unique 6-character alphanumeric room code and stores the session data.
                   String generatedCode = await _firestoreService
                       .createClassroom(
                     subject: subjectController.text,
@@ -363,3 +386,4 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     );
   }
 }
+
