@@ -2,14 +2,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
-// REFACTORED IMPORTS: Using Feature-First Architecture
 import 'package:classguard/core/routes/app_routes.dart';
 import 'package:classguard/core/theme/app_theme.dart';
 import 'package:classguard/features/auth/screens/auth_screen.dart';
 import 'package:classguard/features/auth/services/auth_service.dart';
 import 'package:classguard/features/onboarding/screens/permission_onboarding_screen.dart';
 
-// SHARED COMPONENTS
+// ADDED: Import background service to normalize device upon logout
+import 'package:classguard/core/background/classguard_background.dart';
+
 import 'package:classguard/shared/widgets/primary_button.dart';
 import 'package:classguard/shared/widgets/setting_card.dart';
 import 'package:classguard/shared/widgets/section_header.dart';
@@ -62,13 +63,11 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          // REUSABLE WIDGET: SectionHeader
           const SectionHeader(
               title: 'Account',
               padding: EdgeInsets.only(bottom: 12)
           ),
 
-          // REUSABLE WIDGET: SettingCard
           SettingCard(
             icon: Icons.person_outline,
             title: 'Edit Profile',
@@ -153,7 +152,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // UI PRESERVATION: Retained original ListTile to keep the destructive red visual cue
           ListTile(
             onTap: () async {
               final authService = AuthService();
@@ -163,6 +161,10 @@ class SettingsScreen extends StatelessWidget {
                 Fluttertoast.showToast(msg: "Cannot logout while a session is actively running.", backgroundColor: Colors.red);
                 return;
               }
+
+              // ADDED: Force terminate background protection and restore device volume
+              // This ensures the device returns to normal state if logged out during a Personal Schedule.
+              stopClassGuard();
 
               await authService.logout();
               if (context.mounted) {
@@ -301,7 +303,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             TextField(controller: emailController, keyboardType: TextInputType.emailAddress, decoration: AppTheme.baseInputDecoration("Enter your email address")),
             const SizedBox(height: 48),
 
-            // REUSABLE WIDGET: PrimaryButton
             PrimaryButton(
               text: 'Save Changes',
               isLoading: isLoading,
@@ -326,3 +327,4 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 }
+

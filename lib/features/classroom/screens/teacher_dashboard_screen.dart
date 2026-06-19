@@ -23,7 +23,7 @@ class TeacherDashboardScreen extends StatelessWidget {
     if (packageName == "all") return "All Applications";
     List<String> parts = packageName.split('.');
     parts.removeWhere(
-      (part) => ['com', 'org', 'net', 'co', 'id', 'www', 'android', 'app'].contains(part.toLowerCase()),
+          (part) => ['com', 'org', 'net', 'co', 'id', 'www', 'android', 'app'].contains(part.toLowerCase()),
     );
     if (parts.isEmpty) parts = [packageName.split('.').last];
     return parts.map((word) => word.isEmpty ? "" : word[0].toUpperCase() + word.substring(1).toLowerCase()).join(' ');
@@ -143,8 +143,47 @@ class TeacherDashboardScreen extends StatelessWidget {
     );
   }
 
-  // UI COMPONENT: Renders a modal interface displaying currently enrolled students and their respective attendance status.
-  void _showStudentsList(BuildContext context, Map<String, dynamic> studentNames, Map<String, dynamic> joinTimes, Map<String, dynamic> studentIds, String startTime, List<dynamic> blockedApps) {
+  void _showViolationLogs(BuildContext context, String studentName, String studentUid, Map<String, dynamic> violationLogs) {
+    List<dynamic> logs = violationLogs[studentUid] ?? [];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          height: 400,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Activity Logs: $studentName', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Expanded(
+                child: logs.isEmpty
+                    ? const EmptyState(message: 'No violations recorded.')
+                    : ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) {
+                    var log = logs[logs.length - 1 - index];
+                    DateTime date = DateTime.parse(log['timestamp']).toLocal();
+                    String timeStr = "${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
+                    String app = log['app'] ?? 'Unknown App';
+                    return ListTile(
+                      leading: const Icon(Icons.block, color: Colors.red),
+                      title: Text("Tried to open ${_getCleanAppName(app)}"),
+                      subtitle: Text("At $timeStr"),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showStudentsList(BuildContext context, Map<String, dynamic> studentNames, Map<String, dynamic> joinTimes, Map<String, dynamic> studentIds, String startTime, List<dynamic> blockedApps, Map<String, dynamic> violationLogs) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -177,23 +216,30 @@ class TeacherDashboardScreen extends StatelessWidget {
                             if (jMins > startMins) lateMins = jMins - startMins;
                           }
 
-                          Widget subtitleWidget = lateMins > 0
-                              ? Row(children: [
-                                  const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                                  const SizedBox(width: 8),
-                                  Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)), child: Text('Late $lateMins mins', style: const TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.bold))),
-                                ])
-                              : const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54));
+                    // CORE LOGIC: Calculate if the student joined late
+                    if (joinTime.isNotEmpty) {
+                      int jMins = _timeToMins(joinTime);
+                      if (jMins > startMins) lateMins = jMins - startMins;
+                    }
 
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const CircleAvatar(backgroundColor: Color(0xFFF5F5F5), child: Icon(Icons.person_outline, color: Colors.black87)),
-                            title: Text('$studentName ($idStr)', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: subtitleWidget,
-                            trailing: IconButton(icon: const Icon(Icons.key, color: Colors.orange), onPressed: () => _showGrantAccessDialog(context, studentUid, studentName, blockedApps)),
-                          );
-                        },
-                      ),
+                    Widget subtitleWidget = lateMins > 0
+                        ? Row(children: [
+                      const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      const SizedBox(width: 8),
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)), child: Text('Late $lateMins mins', style: const TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.bold))),
+                    ])
+                        : const Text('Joined successfully', style: TextStyle(fontSize: 12, color: Colors.black54));
+
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(backgroundColor: Color(0xFFF5F5F5), child: Icon(Icons.person_outline, color: Colors.black87)),
+                      title: Text('$studentName ($idStr)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: subtitleWidget,
+                      trailing: IconButton(icon: const Icon(Icons.key, color: Colors.orange), onPressed: () => _showGrantAccessDialog(context, studentUid, studentName, blockedApps)),
+                      onTap: () => _showViolationLogs(context, studentName, studentUid, violationLogs),
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -222,61 +268,61 @@ class TeacherDashboardScreen extends StatelessWidget {
                     child: history.isEmpty
                         ? const EmptyState(message: 'No history available.')
                         : ListView.builder(
-                            itemCount: history.length,
-                            itemBuilder: (context, index) {
-                              var session = history[history.length - 1 - index];
-                              DateTime date = DateTime.parse(session['date']);
-                              String formattedDate = "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
-                              Map<String, dynamic> students = session['students'] ?? {};
-                              Map<String, dynamic> joinTimes = session['joinTimes'] ?? {};
-                              Map<String, dynamic> sessionIds = session['studentIds'] ?? {};
+                      itemCount: history.length,
+                      itemBuilder: (context, index) {
+                        var session = history[history.length - 1 - index];
+                        DateTime date = DateTime.parse(session['date']);
+                        String formattedDate = "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
+                        Map<String, dynamic> students = session['students'] ?? {};
+                        Map<String, dynamic> joinTimes = session['joinTimes'] ?? {};
+                        Map<String, dynamic> sessionIds = session['studentIds'] ?? {};
 
-                              return ExpansionTile(
-                                title: Text(formattedDate, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                subtitle: Text('${students.length} students joined'),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                      onPressed: () {
-                                        ConfirmDialog.show(
-                                          context: context,
-                                          title: 'Delete History',
-                                          message: 'Are you sure you want to delete this attendance record? This action cannot be undone.',
-                                          confirmText: 'Delete',
-                                          isDestructive: true,
-                                          onConfirm: () {
-                                            List updatedHistory = List.from(history);
-                                            updatedHistory.removeAt(history.length - 1 - index);
-                                            FirestoreService().updateAttendanceHistory(scheduleId: course.id, updatedHistory: updatedHistory);
-                                            Navigator.pop(context); 
-                                            Fluttertoast.showToast(msg: "History record deleted.");
-                                          },
-                                        );
-                                      },
-                                    ),
-                                    const Icon(Icons.expand_more),
-                                  ],
-                                ),
-                                children: students.keys.map((uid) {
-                                  String name = students[uid] ?? 'Student';
-                                  String jTime = joinTimes[uid] ?? '';
-                                  String idStr = sessionIds[uid] ?? '-';
-                                  int startMins = _timeToMins(startTime);
-                                  int lateMins = 0;
-                                  if (jTime.isNotEmpty) {
-                                    int jMins = _timeToMins(jTime);
-                                    if (jMins > startMins) lateMins = jMins - startMins;
-                                  }
-                                  return ListTile(
-                                    title: Text('$name ($idStr)', style: const TextStyle(fontSize: 14)),
-                                    trailing: lateMins > 0 ? Text('Late $lateMins mins', style: const TextStyle(color: Colors.red, fontSize: 12)) : const Text('On time', style: TextStyle(color: Colors.green, fontSize: 12)),
+                        return ExpansionTile(
+                          title: Text(formattedDate, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${students.length} students joined'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                onPressed: () {
+                                  ConfirmDialog.show(
+                                    context: context,
+                                    title: 'Delete History',
+                                    message: 'Are you sure you want to delete this attendance record? This action cannot be undone.',
+                                    confirmText: 'Delete',
+                                    isDestructive: true,
+                                    onConfirm: () {
+                                      List updatedHistory = List.from(history);
+                                      updatedHistory.removeAt(history.length - 1 - index);
+                                      FirestoreService().updateAttendanceHistory(scheduleId: course.id, updatedHistory: updatedHistory);
+                                      Navigator.pop(context);
+                                      Fluttertoast.showToast(msg: "History record deleted.");
+                                    },
                                   );
-                                }).toList(),
-                              );
-                            },
+                                },
+                              ),
+                              const Icon(Icons.expand_more),
+                            ],
                           ),
+                          children: students.keys.map((uid) {
+                            String name = students[uid] ?? 'Student';
+                            String jTime = joinTimes[uid] ?? '';
+                            String idStr = sessionIds[uid] ?? '-';
+                            int startMins = _timeToMins(startTime);
+                            int lateMins = 0;
+                            if (jTime.isNotEmpty) {
+                              int jMins = _timeToMins(jTime);
+                              if (jMins > startMins) lateMins = jMins - startMins;
+                            }
+                            return ListTile(
+                              title: Text('$name ($idStr)', style: const TextStyle(fontSize: 14)),
+                              trailing: lateMins > 0 ? Text('Late $lateMins mins', style: const TextStyle(color: Colors.red, fontSize: 12)) : const Text('On time', style: TextStyle(color: Colors.green, fontSize: 12)),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -326,6 +372,7 @@ class TeacherDashboardScreen extends StatelessWidget {
           Map<String, dynamic> studentIds = docData['studentIds'] ?? {};
           List<dynamic> blockedApps = docData['blockedApps'] ?? [];
           List<dynamic> history = docData['history'] ?? [];
+          Map<String, dynamic> violationLogs = docData['violationLogs'] ?? {};
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -339,12 +386,12 @@ class TeacherDashboardScreen extends StatelessWidget {
                   roomCode: docData['roomCode'] ?? '-',
                   securityPIN: docData['securityPIN'] ?? '----',
                 ),
-                
+
                 const SizedBox(height: 32),
                 const Text('SESSION INFO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
                 const SizedBox(height: 12),
                 GestureDetector(
-                  onTap: () => _showStudentsList(context, studentNames, joinTimes, studentIds, docData['startTime'] ?? "00:00", blockedApps),
+                  onTap: () => _showStudentsList(context, studentNames, joinTimes, studentIds, docData['startTime'] ?? "00:00", blockedApps, violationLogs),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.black.withValues(alpha: 0.1))),
@@ -391,9 +438,36 @@ class TeacherDashboardScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 48),
-                
+
                 PrimaryButton(
                   text: 'End Session',
+                  onPressed: isCurrentlyActive
+                      ? () {
+                    ConfirmDialog.show(
+                      context: context,
+                      title: 'End Session?',
+                      message: 'Are you sure you want to end this session? All student devices will be unlocked.',
+                      confirmText: 'End Session',
+                      isDestructive: true,
+                      onConfirm: () {
+                        String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+                        FirestoreService().endClassSession(scheduleId: course.id, uid: uid, studentNames: studentNames, studentIds: studentIds, joinTimes: joinTimes);
+                        Fluttertoast.showToast(msg: "Class Session Ended. All student devices unlocked.");
+                        Navigator.pop(context);
+                      },
+                    );
+                  }
+                      : null,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
                   onPressed: isCurrentlyActive 
                     ? () {
                         ConfirmDialog.show(

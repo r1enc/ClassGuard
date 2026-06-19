@@ -58,9 +58,9 @@ class AuthService {
 
     UserCredential user = await FirebaseAuth.instance
         .signInWithEmailAndPassword(
-          email: email.trim(),
-          password: password.trim(),
-        );
+      email: email.trim(),
+      password: password.trim(),
+    );
 
     DocumentSnapshot doc = await FirebaseFirestore.instance
         .collection('users')
@@ -72,7 +72,7 @@ class AuthService {
       finalEmail = data['email'] ?? finalEmail;
       finalId =
           data['studentId'] ??
-          (Random().nextInt(900000000) + 100000000).toString();
+              (Random().nextInt(900000000) + 100000000).toString();
       String? cloudImage = data['profileImage'];
       if (cloudImage != null) {
         await prefs.setString('profileImage', cloudImage);
@@ -103,9 +103,9 @@ class AuthService {
 
     UserCredential user = await FirebaseAuth.instance
         .createUserWithEmailAndPassword(
-          email: email.trim(),
-          password: password.trim(),
-        );
+      email: email.trim(),
+      password: password.trim(),
+    );
 
     await user.user?.updateDisplayName(finalName);
 
@@ -113,11 +113,11 @@ class AuthService {
         .collection('users')
         .doc(user.user!.uid)
         .set({
-          'name': finalName,
-          'email': finalEmail,
-          'studentId': finalId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+      'name': finalName,
+      'email': finalEmail,
+      'studentId': finalId,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
     await saveLoggedInUser(
       name: finalName,
@@ -128,7 +128,8 @@ class AuthService {
 
     return AuthResult(name: finalName, email: finalEmail, studentId: finalId);
   }
-// Cache authenticated user data locally for fast session restoration.
+
+  // Cache authenticated user data locally for fast session restoration.
   Future<void> saveLoggedInUser({
     required String name,
     required String email,
@@ -190,49 +191,47 @@ class AuthService {
       'profileImage': profileImage,
     });
   }
-// Prevent logout while focus session or app lock is currently active.
-  Future<bool> canLogout() async {
-    final prefs = await SharedPreferences.getInstance();
-    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-    final now = DateTime.now();
-    final dayStr = [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-      "Fri",
-      "Sat",
-      "Sun",
-    ][now.weekday - 1];
+  // Prevent logout while focus session or app lock is currently active.
+  Future<bool> canLogout() async {
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    final prefs = await SharedPreferences.getInstance();
+
+    DateTime now = DateTime.now();
     int currentMins = now.hour * 60 + now.minute;
+    String dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
 
     final snapshot = await FirebaseFirestore.instance
         .collection('schedules')
         .where('joinedStudents', arrayContains: uid)
-        .where('isActive', isEqualTo: true)
         .get();
 
-    bool isClassRunning = false;
+    bool isClassroomRunning = false;
+
+    // Enhanced recovery logic. Syncs with Firestore to ensure state
+    // remains accurate even after a force close from the home screen.
     for (var doc in snapshot.docs) {
       final data = doc.data();
-      if (data['day'] == dayStr) {
+
+      // Strict check to only validate active schedules
+      if (data['day'] == dayStr && data['isActive'] == true) {
         int start = timeToMinutes(data['startTime'] ?? "00:00");
         int end = timeToMinutes(data['endTime'] ?? "00:00");
 
         if (currentMins >= start && currentMins < end) {
-          if (data['role'] == 'Teacher' && data['userId'] == uid) {
-            continue;
+          // Only block logout if the active schedule has a Teacher role.
+          // Personal schedules are bypassed, granting logout permission.
+          if (data['role'] == 'Teacher') {
+            isClassroomRunning = true;
+            break;
           }
-
-          isClassRunning = true;
-          break;
         }
       }
     }
 
-    bool isLockedLocal = prefs.getBool('isAppLockActive') ?? false;
-    return !isClassRunning && !isLockedLocal;
+    // Return false only if a Classroom session is running.
+    // Local personal locks will not prevent logout anymore.
+    return !isClassroomRunning;
   }
 
   Future<void> logout() async {
@@ -240,7 +239,8 @@ class AuthService {
     await prefs.clear();
     await FirebaseAuth.instance.signOut();
   }
-// Restore onboarding and login state during app startup.
+
+  // Restore onboarding and login state during app startup.
   Future<SplashUserState> loadSplashUserState() async {
     final prefs = await SharedPreferences.getInstance();
     bool isSetupDone = prefs.getBool('isFirstTimeSetupDone') ?? false;

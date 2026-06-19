@@ -29,6 +29,7 @@ import 'package:classguard/features/exam/screens/create_exam.dart';
 import 'package:classguard/features/exam/screens/exam_session.dart';
 import 'package:classguard/features/exam/screens/exam_dashboard.dart';
 import 'package:classguard/features/exam/screens/exam_history.dart';
+import 'package:classguard/core/background/classguard_background.dart';
 
 import 'package:classguard/shared/widgets/custom_bottom_sheet.dart';
 import 'package:classguard/shared/widgets/exam_card.dart';
@@ -99,6 +100,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
     });
+
+    platform.setMethodCallHandler((call) async {
+      if (call.method == 'onViolation') {
+        String pkg = call.arguments;
+        _handleViolation(pkg);
+      }
+    });
+  }
+
+  void _handleViolation(String pkg) {
+    final now = DateTime.now();
+    final dayStr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][now.weekday - 1];
+    int currentMins = now.hour * 60 + now.minute;
+
+    for (var doc in _currentSchedules) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['isActive'] == true && data['day'] == dayStr && data['role'] != 'Personal') {
+        int start = timeToMinutes(data['startTime'] ?? "00:00");
+        int end = timeToMinutes(data['endTime'] ?? "00:00");
+        if (currentMins >= start && currentMins < end) {
+          _firestoreService.logViolation(scheduleId: doc.id, packageName: pkg);
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _setupFCMToken() async {
@@ -114,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
       if (token != null && uid.isNotEmpty) {
-        // Use .set with SetOptions(merge: true) to safely update or create the document
         await FirebaseFirestore.instance.collection('users').doc(uid).set({
           'fcmToken': token,
         }, SetOptions(merge: true));
@@ -760,13 +785,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (course.isOwner) { _firestoreService.deleteSchedule(course.id); } else { _firestoreService.leaveSchedule(course.id); }
       },
       onToggleActive: () async {
-        if (isRunning && course.isActive == true) { Fluttertoast.showToast(msg: "Class is running. Cannot turn off.", backgroundColor: Colors.red); return; }
-        if (!course.isOwner) { Fluttertoast.showToast(msg: "Only the teacher can toggle this room.", backgroundColor: Colors.red); return; }
+        // Allow canceling active Personal schedules.
+        // Block toggle-off only if it's a Teacher/Classroom schedule that is currently running.
+        if (isRunning && course.isActive == true) {
+          if (course.role == 'Teacher') {
+            Fluttertoast.showToast(msg: "Classroom is running. Cannot turn off.", backgroundColor: Colors.red);
+            return;
+          } else {
+            // It's a personal schedule. Execute stop action immediately.
+            stopClassGuard();
+            Fluttertoast.showToast(
+                msg: "Personal schedule stopped. Device normalized.",
+                backgroundColor: Colors.white,
+                textColor: Colors.black
+            );
+          }
+        }
+
+        if (!course.isOwner) {
+          Fluttertoast.showToast(msg: "Only the teacher can toggle this room.", backgroundColor: Colors.red);
+          return;
+        }
+
         bool newVal = !course.isActive;
         if (newVal) {
           String? error = await _firestoreService.checkAndHandleCollision(course.day, course.startTime, course.endTime, course.role, excludeId: course.id);
           if (error != null) {
-            if (error == "OVERRIDDEN") { Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled."); } else {
+            if (error == "OVERRIDDEN") {
+              Fluttertoast.showToast(msg: "Notice: A conflicting personal schedule was auto-disabled.");
+            } else {
               if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
               return;
             }
@@ -779,3 +826,4 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 }
+
